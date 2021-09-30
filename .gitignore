@@ -1,0 +1,7 @@
+Logfiles
+*.ini
+*.csv
+*.db
+*.dll
+*.log
+Teszt.ps1
