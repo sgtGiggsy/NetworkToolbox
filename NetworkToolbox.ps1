@@ -22,8 +22,6 @@
 ######                                                                  ######
 ######    Fejlesztési tervek:                                           ######
 ######      - bugfixek (folyamatban)                                    ######
-######      - komplett refaktor (folyamatban)                           ######
-######      - SQLite integráció (folyamatban)                           ######
 ######      - képessé tenni tömeges switch automatizálásra (pl mentés)  ######
 ######      - képessé tenni adatkinyerésre switchekből táblázatba       ######
 ######      - képessé tenni VLANok közti traceroute-ra is               ######
@@ -60,6 +58,7 @@ $Script:config = @{
     fileserver = "fileszervernév"
     ounev = "alapértelmezett"
     port = 23
+    method = 1
     waittime = 500
     maxhiba = 4
     retrytime = 15
@@ -75,6 +74,8 @@ $Script:config = @{
 
 $Script:runtime = @{
     sql = $null
+    cred = $null
+    pingoptions = $null
     admin = $False
     adavailable = $False
 }
@@ -120,12 +121,12 @@ $logEvents = @{
 ###################################################################################################
 
 $MainMenu = New-Object System.Collections.ArrayList($null)
-[void]$MainMenu.Add([MenuElem]::New("Egy eszköz helyének megkeresése a hálózaton", $True, $False, ${function:Set-Kiiratas}))
+[void]$MainMenu.Add([MenuElem]::New("Egy eszköz helyének megkeresése a hálózaton", $True, $False, ${function:Get-DeviceLocation}))
 [void]$MainMenu.Add([MenuElem]::New("Egy OU minden számítógépe helyének lekérdezése, és fájlba mentése", $True, $True, ${function:Get-ADcomputersLocation}))
 [void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány minden eszköze helyének lekérdezése, és fájlba mentése", $True, $True, ${function:Get-IPrangeDevicesLocation}))
-[void]$MainMenu.Add([MenuElem]::New("Egy OU gépeinek végigpingelése, és az eredmény fájlba mentése", $False, $True, ${function:Get-ADcomputersState}))
+[void]$MainMenu.Add([MenuElem]::New("Egy OU gépeinek végigpingelése, és az eredmény fájlba mentése", $False, $True, ${function:Test-ADcomputersState}))
 [void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány végigpingelése, és az eredmény fájlba mentése", ${function:Test-IPRangeState}))
-[void]$MainMenu.Add([MenuElem]::New("Egy felhasználó jelenleg használt gépének neve", $True, $True, ${function:Get-UserComputer}))
+[void]$MainMenu.Add([MenuElem]::New("Egy felhasználó jelenleg használt gépének neve", $True, $True, ${function:Get-UserCurrentComputer}))
 
 ###################################################################################################
 ###                            IMPORTÁLT FÜGGVÉNYEK ÉS OSZTÁLYOK                                ###
@@ -322,7 +323,6 @@ Class MenuElem
     }
 }
 
-
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #-#-#                                    FÜGGVÉNYEK                                           #-#-#
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
@@ -412,14 +412,14 @@ function Initialize-Basics
     }
 }
 
-# FRISSÍTVE
+##### FRISSÍTVE #####
 function Read-Ini
 {
     ###############################################################
     #
     # Leírás:       INI fájlok tartalmának beolvasása. A függvény beolvassa a mellékelt INI-t,
     #               és megpróbálja a benne lévő beállításokkal felülírni a script azonos nevű beállításait.
-    #               Csak azokat a bellításokat írja felül, amihez talál párt a fájlban.
+    #               Csak azokat a beállításokat írja felül, amihez talál párt a fájlban.
     #
     # Bemenet:      Nincs
     #
@@ -478,7 +478,7 @@ function Write-Ini
     param ()
 }
 
-# FRISSÍTVE
+##### FRISSÍTVE #####
 function Send-Mail
 {
     ###############################################################
@@ -502,38 +502,46 @@ function Send-Mail
         [Switch]$Surgos
     )
 
-    $password = ConvertTo-SecureString -String $Script:config.mailpass -AsPlainText -Force
-    $cred = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $Script:config.mailuser, $password
-    try
+    Begin
     {
-        if($Surgos)
+        $password = ConvertTo-SecureString -String $Script:config.mailpass -AsPlainText -Force
+        $cred = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $Script:config.mailuser, $password
+    }
+    
+    Process
+    {
+        try
         {
-            if($Attachment)
+            if($Surgos)
             {
-                Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -Attachments $Attachment -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode -Priority High
+                if($Attachment)
+                {
+                    Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -Attachments $Attachment -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode -Priority High
+                }
+                else
+                {
+                    Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode -Priority High
+                }
             }
             else
             {
-                Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode -Priority High
+                if($Attachment)
+                {
+                    Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -Attachments $Attachment -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode
+                }
+                else
+                {
+                    Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode
+                }
             }
+            Out-Result -Text "Értesítő mail elküldve $($Script:config.mailto) részére" -Level "green" -Tag "mail"
         }
-        else
+        catch
         {
-            if($Attachment)
-            {
-                Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -Attachments $Attachment -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode
-            }
-            else
-            {
-                Send-MailMessage -From $Script:config.mailfrom -To $Script:config.mailto -Subject $Subject -Body $Mailbody -SmtpServer $Script:config.mailserver -Credential $cred -Port $Script:config.mailport -Encoding Unicode
-            }
+            Out-Result -Text "Mail küldése $($Script:config.mailto) részére sikertelen" -Level "err" -Tag "mailerr"
         }
-        Out-Result -Text "Értesítő mail elküldve $($Script:config.mailto) részére" -Level "green" -Tag "mail"
     }
-    catch
-    {
-        Out-Result -Text "Mail küldése $($Script:config.mailto) részére sikertelen" -Level "err" -Tag "mailerr"
-    }
+    
 }
 
 ##### ÚJ
@@ -541,19 +549,27 @@ function Show-Menu
 {
     ###############################################################
     #
-    # Leírás:       Menü megjelenítő függvény. Vesz egy [MenuElem] objektumokat tartalmazó ArrayListet, és megjeleníti a tartalmát
-    #               attól függően, hogy az adott menüelemekre milyen jogosultságok lettek beállítva.
+    # Leírás:       Menü megjelenítő függvény. Vesz egy [MenuElem] objektumokat tartalmazó ArrayListet,
+    #               és megjeleníti a tartalmát attól függően, hogy az adott menüelemekre
+    #               milyen jogosultságok lettek beállítva.
+    #               A Kilépés és a Visszalépés az előző menübe menüpontok külön billentyűkre kerültek,
+    #               így összesen 11 (9 + a Kilépés/Visszalépés) menüelem megjelenítésére van mód.
+    #               A függvény az első 9 megjeleníthető menüpontot jeleníti meg, az utána következőeket
+    #               egyszerűen levágja hibaüzenet, vagy figyelmeztetés nélkül.
+    #               A 9 menüpontos korlátra a Get-Valasztas miatt van szükség, mivel az csak egy karaktert
+    #               fogad el bemenetnek.
     #               
     # Bemenet:      -Menu:      A menüelemeket tartalmazó ArrayList, kötelező megadni
     #               -Exit:      Kapcsoló, amellyel megadhatjuk, hogy utolsó elemként bekerüljön-e a Kilépés menüpont
-    #               -BackOne:   Kapcsoló, amellyel megadhtajuk, hogy utolsó (vagy -Exit esetén utolsó előtti) elemként bekerüljön-e a "Feljebb egy menüvel" menüpont
+    #               -BackOne:   Kapcsoló, amellyel megadhtajuk, hogy utolsó (vagy -Exit esetén utolsó előtti) elemként bekerüljön-e a "Visszalépés az előző menübe" menüpont
     #
-    # Függőségek:   Nincs
+    # Függőségek:   MenuElem osztály
+    #               Get-Valasztas
     #
     ###############################################################
 
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Menu,
+        [Parameter(Mandatory=$true)]$Menu,
         [Switch]$Exit,
         [Switch]$BackOne
     )
@@ -565,68 +581,68 @@ function Show-Menu
     foreach ($menuitem in $Menu)
     {
         $additem = $false
-        Show-Debug $menuitem.Nev
-        if($menuitem.Admin -or $menuitem.ActiveDirectory)
+        if($menuitem.Admin -or $menuitem.ActiveDirectory) # Ellenőrizzük, hogy az elemnek vannak-e jogosultság igényei
         {
-            Show-Debug "Admin vagy ad kell"
-            Show-Debug $menuitem.ActiveDirectory
-            Show-Debug $menuitem.Admin
             if(!$menuitem.Admin -and $menuitem.ActiveDirectory -eq $Script:runtime.adavailable)
             {
-                Show-Debug "AD kell, admin nem"
                 $additem = $true
             }
             elseif (!$menuitem.ActiveDirectory -and $menuitem.Admin -eq $Script:runtime.admin)
             {
-                Show-Debug "Admin kell, AD nem"
                 $additem = $true
             }
             elseif ($menuitem.ActiveDirectory -eq $Script:runtime.adavailable -and $menuitem.Admin -eq $Script:runtime.admin)
             {
-                Show-Debug "Admin és AD is kell"
                 $additem = $true
             }
         }
-        else
+        elseif ($i -lt 10) # Ha az elemnek nem kell plusz jogosultság, és 10-nél kevesebb menüpont van, hozzáadjuk a listához
         {
-            Show-Debug "Sem admin, sem AD nem kell"
             $additem = $true
         }
-        
+
         if($additem)
         {
             $i++
             Write-Host "($i) $($menuitem.Nev)"
             $valasztastomb += $i
         }
-        else
+        else # Ha egy elem kiszűrésre került, kivesszük a kimenetnek használt ArrayList-ből
         {
             $MenuToShow.Remove($menuitem)
         }
 
-        if(($menuitem -eq $Menu[-1]) -and ($Exit -or $BackOne))
+        if(($menuitem -eq $Menu[-1]) -and ($Exit -or $BackOne)) # Az utolsó menüelemet követően hozzáadjuk a lezáró menüpontokat
         {
-            if($BackOne)
+            if($BackOne) # Ha szeretnénk, hogy legyen egy "Vissza" menüpont
             {
-                $i++
-                Write-Host "($i) Feljebb egy menüvel"
-                $valasztastomb += $i
-                [Void]$MenuToShow.Add([MenuElem]::New("Break"))
+                Write-Host "(V) Visszalépés az előző menübe"
+                $valasztastomb += "V"
             }
-            if($Exit)
+            if($Exit) # Ha szeretnénk, hogy legyen egy "Kilépés" menüpont
             {
-                $i++
-                Write-Host "($i) Kilépés"
-                $valasztastomb += $i
-                [Void]$MenuToShow.Add([MenuElem]::New("Exit"))
+                Write-Host "(K) Kilépés"
+                $valasztastomb += "K"
             }
         }
     }
     $valaszt = Get-Valasztas $valasztastomb
 
-    Invoke-Expression "$($MenuToShow[$valaszt-1].Call)"
+    if($valaszt -eq "K")
+    {
+        Exit
+    }
+    elseif ($valaszt -eq "V")
+    {
+        Break
+    }
+    else
+    {
+        Invoke-Expression "$($MenuToShow[$valaszt-1].Call)" # Invoke-oljuk a stringben átadott függvényt
+    }
 }
 
+##### FRISSÍTVE #####
 function Out-Result
 {
     ###############################################################
@@ -648,9 +664,9 @@ function Out-Result
     ###############################################################
 
     param (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Text,
-        [Parameter(Mandatory=$false, ValueFromPipeline=$true)]$Level,
-        [Parameter(Mandatory=$false, ValueFromPipeline=$true)]$Tag,
+        [Parameter(Mandatory=$true)]$Text,
+        [Parameter(Mandatory=$false)]$Level,
+        [Parameter(Mandatory=$false)]$Tag,
         [switch]$Overwrite,
         [switch]$NoNewLine
     )
@@ -727,6 +743,7 @@ function Out-Result
     }
 }
 
+##### FRISSÍTVE #####
 function Add-Log
 {
     ###############################################################
@@ -743,8 +760,8 @@ function Add-Log
     ###############################################################
 
     param (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Tag,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Text
+        [Parameter(Mandatory=$true)]$Tag,
+        [Parameter(Mandatory=$true)]$Text
         )
 
     if($Script:config.logging)
@@ -788,8 +805,8 @@ function Save-ToCSV
     ###############################################################
 
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Path,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$ToSave
+        [Parameter(Mandatory=$true)]$Path,
+        [Parameter(Mandatory=$true)]$ToSave
         )
 
     $ToSave | Export-CSV -encoding UTF8 -path $Path -NoTypeInformation -Append -Force -Delimiter ";"
@@ -856,6 +873,7 @@ function Initialize-ADmodule
     Return $adavailable
 }
 
+##### FRISSÍTVE #####
 function ConvertTo-DistinguishedName
 {
     ###############################################################
@@ -873,7 +891,7 @@ function ConvertTo-DistinguishedName
     #
     ###############################################################
     
-    param([Parameter(Mandatory=$true, ValueFromPipeline=$true)]$OrganizationalUnit) #OU name in the form you can find it in ADUC
+    param([Parameter(Mandatory=$true)]$OrganizationalUnit) #OU name in the form you can find it in ADUC
 
     $kimenet = $OrganizationalUnit.Split("/") #Splitting the OU name by slash characters
     
@@ -908,7 +926,7 @@ function ConvertTo-DistinguishedName
     return $forditott #OU name in DistinguishedName form
 }
 
-##### FRISSÍTVE !!!!!
+##### FRISSÍTVE #####
 function Test-OU
 {
     ###############################################################
@@ -934,7 +952,7 @@ function Test-OU
     ###############################################################
     
     param(
-        [Parameter(Mandatory=$false, ValueFromPipeline=$true)]$OUToTest,
+        [Parameter(Mandatory=$false)]$OUToTest,
         [Switch]$NoDistinguish,
         [Switch]$Users,
         [Switch]$Computers,
@@ -1022,7 +1040,7 @@ function Test-OU
     }
 }
 
-##### FRISSÍTVE !!!!!
+##### FRISSÍTVE #####
 function Select-OU
 {
     ###############################################################
@@ -1206,6 +1224,7 @@ function Get-LoginCred
 ## kezelési feladatokra ##
 ##########################
 
+##### FRISSÍTVE #####
 function Start-Wait
 {
     ###############################################################
@@ -1223,7 +1242,7 @@ function Start-Wait
     ###############################################################
     
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Seconds
+        [Parameter(Mandatory=$true)]$Seconds
     )
 
     for($i = $Seconds; $i -ge 0; $i--)
@@ -1236,7 +1255,7 @@ function Start-Wait
     }
 }
 
-######## FRISSÍTVE !!!!!!
+##### FRISSÍTVE #####
 function Get-Valasztas
 {
     ###############################################################
@@ -1263,7 +1282,7 @@ function Get-Valasztas
     ###############################################################
 
     param(
-        [Parameter(Mandatory=$false, ValueFromPipeline=$true)]$Engedelyezettek,
+        [Parameter(Mandatory=$false)]$Engedelyezettek,
         [Switch]$Idokorlat,
         [Switch]$YesNo
         )
@@ -1347,6 +1366,7 @@ function Get-Valasztas
     return $valasztas
 }
 
+##### FRISSÍTVE #####
 function Show-JobInProgress
 {
     ###############################################################
@@ -1365,8 +1385,8 @@ function Show-JobInProgress
     ###############################################################
 
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Text,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Job
+        [Parameter(Mandatory=$true)]$Text,
+        [Parameter(Mandatory=$true)]$Job
         )
 
     $speed = 300
@@ -1419,7 +1439,7 @@ function Get-UtolsoUser
     #
     ###############################################################
 
-    param ([Parameter(Mandatory=$True, ValueFromPipeline=$True)]$Gepnev)
+    param ([Parameter(Mandatory=$True)]$Gepnev)
     
     try
     {
@@ -1448,77 +1468,53 @@ function Get-UtolsoUser
 #-#-#                                     OSZTÁLYOK                                           #-#-#
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 
+#####
+##  Objektumok
+#####
+
 Class CSV
 {
-    ### Valószínűleg törlésre kerülő függvény. A munkájának jelentős része az volt,
-    ### hogy CSV fájlok módosítási idejét és tartalmát hasonlítgassa össze,
-    ### hogy megszakadt futás esetén is folytatni lehessen a programot a legutolsó állapottól.
     ### A most készülő változatban a program már SQLite adatbázisba fog menteni,
     ### és onnan olvassa ki a használni kívánt 
     
     $Nev
-    $oldnev
-    $fajl
-    $old
-    $save
     $kimenet
-    $astemp
 
     CSV($nevelotag, $kozeptag)
     {
-        $this.nev = "$($nevelotag)-$kozeptag.csv"
-        $this.save = $this.fajl
-        $this.kimenet = "$($Script:config.csvkonyvtar)\VÉGEREDMÉNY_$($this.nev)"
-        $this.astemp = $false
-    }
-
-    [Bool]TestCSV()
-    {
-        if (Test-Path $this.old)
-        {
-            if (Test-Path $this.fajl)
-            {
-                [string]$leallasideje = (((Get-ChildItem -Path ".\Logfiles" -Filter $this.nev -Force).LastWriteTime)).ToString("yyyy.MM.dd HH.mm")
-                # Erre az ellenőrzésre azért van szükség, hogy egy véletlenül letörölt CSV fájl ne akassza ki a program működését
-                Add-Log -Text "A program utolsó futása váratlan véget ért:" -Tag "warn"
-                Remove-Item -Path $this.fajl
-            }
-            $this.fajl = $this.old
-            Return $true
-        }
-        elseif (Test-Path $this.fajl)
-        {
-            Return $true
-        }
-        else
-        {
-            Return $false
-        }
+        $this.Nev = "$($nevelotag)-$kozeptag.csv"
+        $this.kimenet = "$($Script:config.csvkonyvtar)\VÉGEREDMÉNY_$($this.Nev)"
     }
 
     Sync($eszkoz)
     {
         # Az eredményt CSV-be író metódus. Ellenőrzi, hogy létezik-e már a fájlban a jelenlegi eszköz bejegyzése,
         # ha nem, beleírja.
-        if((Test-Path $this.kimenet) -and !(Select-String -Path $this.kimenet -Pattern $eszkoz.IPaddress))
+        if(!(Test-Path $this.kimenet))
         {
             $eszkoz | Export-Csv -encoding UTF8 -path $this.kimenet -NoTypeInformation -Append -Force -Delimiter ";"
         }
-        elseif(!(Test-Path $this.kimenet))
+        elseif(!(Select-String -Path $this.kimenet -Pattern $eszkoz.IPaddress))
         {
             $eszkoz | Export-Csv -encoding UTF8 -path $this.kimenet -NoTypeInformation -Append -Force -Delimiter ";"
         }
-    }
+        else
+        {
+            $csvdata = Import-Csv -Path $this.kimenet -Delimiter ";"
 
-    Out($eszkoz)
-    {
-        $eszkoz | export-csv -encoding UTF8 -path $this.save -NoTypeInformation -Append -Force -Delimiter ";"
+            $update = New-Object System.Collections.ArrayList($null)
+            foreach ($sor in $csvdata)
+            {
+                if($sor.IPaddress -ne $eszkoz.IPaddress)
+                {
+                    [Void]$update.Add($sor)
+                }
+            }
+            [Void]$update.Add($eszkoz)
+            $update | Export-Csv -encoding UTF8 -path $this.kimenet -NoTypeInformation -Append -Force -Delimiter ";"
+        }
     }
 }
-
-#####
-##  Objektumok
-#####
 
 Class Eszkoz
 {
@@ -2802,6 +2798,7 @@ function Import-IPaddresses
     $utolsoIP = $null
     $elsokihagyott = $null
     $utolsokihagyott = $null
+
     do
     {
         Show-Cimsor "IP TARTOMÁNY ELLENŐRZŐ"
@@ -2908,8 +2905,8 @@ function Import-SQLiteData
     #
     ###############################################################
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$EgyediNev,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$ObjType,
+        [Parameter(Mandatory=$true)]$EgyediNev,
+        [Parameter(Mandatory=$true)]$ObjType,
         [Switch]$Silent
     )
 
@@ -2993,8 +2990,6 @@ function Import-SQLiteData
     {
         return ,$returnObjArr # A vessző NEM elírás, enélkül objektumot ad vissza a függvény, nem ArrayList-et
     }
-
-    
 }
 
 ##   Lekérő függvények   ##
@@ -3106,7 +3101,7 @@ function Show-Cimsor
     #
     ###############################################################
 
-    param([Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Almenu)
+    param([Parameter(Mandatory=$true)]$Almenu)
     Clear-Host
     Write-Host "HÁLÓZATKEZELÉSI ESZKÖZTÁR`n`n$Almenu`n`n"
 }
@@ -3128,7 +3123,7 @@ function Show-Debug
     #
     ###############################################################
 
-    param([Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Text)
+    param([Parameter(Mandatory=$true)]$Text)
 
     if($Script:config.debug)
     {
@@ -3151,7 +3146,7 @@ function Set-Logname
     #
     ###############################################################
 
-    param([Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Filename)
+    param([Parameter(Mandatory=$true)]$Filename)
 
     $Script:config.logfile = "$Filename.log"
 }
@@ -3263,33 +3258,37 @@ function Test-Ping
     ###############################################################
     param ([Parameter(Mandatory=$True, ValueFromPipeline=$True)]$NetDevice)
 
-    $ping = New-Object System.Net.NetworkInformation.Ping
-
-    $response = $False
-
-    if (!$script:pingoptions)
+    Begin
     {
-        $script:pingoptions = New-Object System.Net.NetworkInformation.PingOptions
-        $script:pingoptions.TTL = 64
-        $script:pingoptions.DontFragment = $true
-    }
-
-    for($i = 0; $i -lt 4; $i++) # Az egyszeri ping néha fals negatívot ad, ezért 4 kísérletet adunk neki a valós False-ra.
-    {
-        try
-        {
-            $reply = $ping.Send($NetDevice,20,16,$script:pingoptions)
-        }
-        catch { }
-
-        if ($reply.status -eq "Success")
-        {
-            $response = $True
-            Break
-        }
+        $ping = New-Object System.Net.NetworkInformation.Ping
+        $response = $False
     }
     
-    return $response
+    Process
+    {
+        if (!$script:runtime.pingoptions)
+        {
+            $script:runtime.pingoptions = New-Object System.Net.NetworkInformation.PingOptions
+            $script:runtime.pingoptions.TTL = 64
+            $script:runtime.pingoptions.DontFragment = $true
+        }
+
+        for($i = 0; $i -lt 4; $i++) # Az egyszeri ping néha fals negatívot ad, ezért 4 kísérletet adunk neki a valós False-ra.
+        {
+            try
+            {
+                $reply = $ping.Send($NetDevice,20,16,$script:runtime.pingoptions)
+            }
+            catch { }
+
+            if ($reply.status -eq "Success")
+            {
+                $response = $True
+                Break
+            }
+        }
+        return $response
+    }
 }
 
 # Tiszta
@@ -3319,9 +3318,9 @@ function Compare-Subnets
     ###############################################################
 
     param (
-        [Parameter(Mandatory=$True, ValueFromPipeline=$True)]$Local,
-        [Parameter(Mandatory=$True, ValueFromPipeline=$True)]$Remote,
-        [Parameter(Mandatory=$True, ValueFromPipeline=$True)]$Mask
+        [Parameter(Mandatory=$True)]$Local,
+        [Parameter(Mandatory=$True)]$Remote,
+        [Parameter(Mandatory=$True)]$Mask
         )
 
     $masktag = [Math]::truncate($Mask / 8) # Megkapjuk, hogy hány negyedet fed le teljesen a maszk
@@ -3362,36 +3361,6 @@ function Compare-Subnets
     return $samesubnet
 }
 
-
-function Get-EgyszeriLekerdezes
-{
-    param($csakkiir)
-    $local = [Local]::New()
-    do
-    {
-        $remote = [Remote]::New()
-
-        if($remote.Elerheto())
-        {
-            $keresesiparancs = [Parancs]::TraceRTHibaJavitassal($local, $remote)
-        }
-        else
-        {
-            Write-Host "Add meg újra az IP címet, vagy nevet!" -ForegroundColor Red
-        }
-    }while(!$keresesiparancs -or !$remote.Elerheto())
-    if(!$csakkiir)
-    {
-        $lekerdezes = [Lekerdezes]::New($keresesiparancs, $local, $remote)
-        return $lekerdezes
-    }
-    else
-    {
-        $returnarray = $keresesiparancs, $local, $remote
-        return $returnarray
-    }
-}
-
 #####
 ##
 ##  Összetett kisegítőfüggvények. Ezek a függvényeket összetettebb,
@@ -3420,8 +3389,8 @@ function Get-Local
     #
     ###############################################################
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Local,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]$Remote
+        [Parameter(Mandatory=$true)]$Local,
+        [Parameter(Mandatory=$true)]$Remote
     )
 
     Show-Debug "Get-Local függvény meghívva"
@@ -3510,31 +3479,65 @@ function Out-LocalToUse
 ##
 #####
 
-function Set-Kiiratas
+##### KÉSZ, TESZTELÉSRE VÁR !!!!!!!!!!!!!!
+function Get-DeviceLocation
 {
+    ###############################################################
+    #
+    # Leírás:       Egy komplett OU eszközeinek helyét megkereső függvény. Az eredményt a Global beállításoknak
+    #               megfelelően menti egy CSV fájlba.
+    #               A függvény ellenőrzi a program SQLite adatbázisában, hogy az adott OU-n futott-e már
+    #               félbeszakadt ellenőrzés, és ha igen, felkínálja a felhasználónak, hogy azt az ellenőrzést
+    #               folytassa, vagy indítson inkább egy újat.
+    #               
+    # Bemenet:      Nincs
+    #
+    # Kimenet:      AD-ból vett számítógépek switchport pontosságú helyét tartalmazó CSV fájl
+    #
+    # Függőségek:   * Show-Cimsor
+    #               * Set-Logname
+    #               * Get-Valasztas
+    #               * SQL osztály
+    #               * Local osztály
+    #               * Remote osztály
+    #               * Eszkoz osztály
+    #               * Parancs osztály
+    #               * Telnet osztály
+    #               * Lekerdezes osztály
+    #
+    # Megnézni:     [Parancs] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
+    #
+    ###############################################################
+
     Show-Cimsor "EGYETLEN ESZKÖZ MEGKERESÉSE"
     Set-Logname "EszkozHely"
-    [Telnet]::Login()
-    $lekerdezes = Get-EgyszeriLekerdezes
+    $local = [Local]::New()
+    do
+    {
+        $remote = [Remote]::New()
+
+        if($remote.Elerheto())
+        {
+            $keresesiparancs = [Parancs]::TraceRTHibaJavitassal($local, $remote)
+        }
+        else
+        {
+            Write-Host "Add meg újra az IP címet, vagy nevet!" -ForegroundColor Red
+        }
+    }while(!$keresesiparancs -or !$remote.Elerheto())
+
+    $lekerdezes = [Lekerdezes]::New($keresesiparancs, $local, $remote)
     if($lekerdezes.Siker())
     {
         $lekerdezes.Kiirat()
     }
-    Write-Host "`nA továbblépéshez üss Entert!"
-    Read-Host
-}
-
-function Set-ParancsKiiratas
-{
-    Show-Cimsor "EGYETLEN ESZKÖZ MEGKERESÉSE"
-    Set-Logname "EszkozHely"
-    $lekerdezes = Get-EgyszeriLekerdezes $true
-    Write-Host "Helyi IP cím:           $($lekerdezes[1].IPaddress) (ezt kell pingelni a switchről, ha a TraceRoute parancs 'Error: Source Mac address not found.' hibát ad."
-    Write-Host "Keresett eszköz IP-je:  $($lekerdezes[2].IPaddress) (ezt kell pingelni a switchről, ha a TraceRoute parancs 'Error: Destination Mac address not found.' hibát ad."
-    Write-Host "Keresési parancs:       $($lekerdezes[0]) (automatikusan a vágólapra másolva)`n"
-    Set-Clipboard $lekerdezes[0]
-    Write-Host "A továbblépéshez üss Entert!"
-    Read-Host
+    else
+    {
+        Write-Host "Helyi IP cím:           $($local.IPaddress) (ezt kell pingelni a switchről, ha a TraceRoute parancs 'Error: Source Mac address not found.' hibát ad."
+        Write-Host "Keresett eszköz IP-je:  $($remote.IPaddress) (ezt kell pingelni a switchről, ha a TraceRoute parancs 'Error: Destination Mac address not found.' hibát ad."
+        Write-Host "Keresési parancs:       $($keresesiparancs) (automatikusan a vágólapra másolva)`n"
+        Set-Clipboard $keresesiparancs
+    }
 }
 
 ######### ELLENŐRIZVE, JELEN FUNKCIÓJÁT TEKINTVE KÉSZ
@@ -3557,10 +3560,18 @@ function Get-ADcomputersLocation
     #               * Import-ADObjects
     #               * Import-SQLiteData
     #               * Out-Result
+    #               * Out-LocalToUse
     #               * Add-Log
     #               * Get-Valasztas
+    #               * Start-Wait
+    #               * SQL osztály
     #               * CSV osztály
-    #               * Time osztály
+    #               * Local osztály
+    #               * Remote osztály
+    #               * Eszkoz osztály
+    #               * Parancs osztály
+    #               * Telnet osztály
+    #               * Lekerdezes osztály
     #
     # Megnézni:     [Parancs] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
     #
@@ -3881,7 +3892,7 @@ function Test-IPRangeState
 }
 
 ######### ELLENŐRIZVE, KÉSZ !!!!!!!!!!!!!!!!!!!!!!!!!
-function Get-UserComputer
+function Get-UserCurrentComputer
 {
     ###############################################################
     #
@@ -3931,10 +3942,10 @@ function Get-UserComputer
         } while (!$conf)
         do
         {
-            if(!$cred -or $hiba) # Ha még nincs $cred objektum, vagy már létezik, de a ciklus hibába futott korábban
+            if(!$Script:runtime.cred -or $hiba) # Ha még nincs $cred objektum, vagy már létezik, de a ciklus hibába futott korábban
             {
                 Write-Host "Add meg a szerveradmin felhasználóneved, és jelszavadat!"
-                $cred = Get-LoginCred
+                $Script:runtime.cred = Get-LoginCred
             }
             try # A bejelentkezési sessionöket lekérdező parancs try-catch blokkja
             {
@@ -3959,7 +3970,7 @@ function Get-UserComputer
             foreach($eredmeny in $eredmenyek) # Ha a felhasználó több gépen is rendelkezik aktív sessionnel, mind kiírjuk
             {
                 $felhasznalo = Get-MegjelenoNev $eredmeny.ClientUserName # A kapott eredmény alapján lekérjük a megjelenő nevet
-                $gepnev = Get-GepNev $eredmeny.ClientComputerName # A kapott eredményb alapján lekérjük a gép nevét
+                $gepnev = Get-GepNev $eredmeny.ClientComputerName # A kapott eredmény alapján lekérjük a gép nevét
                 Out-Result -Text "A(z) $felhasznalo felhasználó jelenleg a(z) $gepnev gépről van bejelentkezve" -Tag "founduser" -Level "green"
             }
         }
@@ -3976,5 +3987,5 @@ Initialize-Basics -Admin
 
 for(;;)
 {
-    Show-Menu -Menu $MainMenu -Exit -BackOne
+    Show-Menu -Menu $MainMenu -Exit
 }
