@@ -3601,7 +3601,7 @@ function Out-LocalToUse
     $eszkoz.SetFelhasznalo()
     $eszkoz.Finished = $True
     $eszkoz.UpdateRecord()
-    $csv.Sync($eszkoz)
+    $csv.Sync($eszkoz, "IPaddress")
 }
 
 #####
@@ -3797,7 +3797,7 @@ function Get-ADcomputersLocation
                             {
                                 Show-Debug "Lekérdezés sikeres"
                                 $eszkoz.SetFelhasznalo() # Meghívjuk az [Eszkoz] metódusát, ami kikeresi a jelenlegi felhasználót
-                                $csv.Sync($eszkoz) # Az eredményt fájlba írjuk
+                                $csv.Sync($eszkoz, "Eszkoznev") # Az eredményt fájlba írjuk
                                 $eszkoz.Finished = $True # Befejezettnek állítjuk be az objektumot
                                 $eszkoz.UpdateRecord() # Frissítjük az adatbázist az [Eszkoz] adataival
                                 $templist.Remove($eszkoz) # Kitöröljük a már kész [Eszkoz]-t a templist tömbből
@@ -3816,7 +3816,7 @@ function Get-ADcomputersLocation
                                 $eszkoz.SetFelhasznalo()
                                 $eszkoz.Finished = $False
                                 $eszkoz.UpdateRecord()
-                                $csv.Sync($eszkoz)
+                                $csv.Sync($eszkoz, "Eszkoznev")
                             }
                         }
                     }
@@ -3901,7 +3901,7 @@ function Get-IPrangeDevicesLocation
                 $eszkoz.Lekerdez($keresesiparancs, $local, $remote)
                 if($eszkoz.Lekerdezes)
                 {
-                    $csv.Sync($eszkoz[$i])
+                    $csv.Sync($eszkoz[$i], "IPaddress")
                     Write-Host "`rA(z) $($eszkoz[$i].IPaddress) eszköz megtalálva a(z) $($eszkoz[$i].SwitchNev) switch $($eszkoz[$i].Port) portján"
                     if ($sajateszkoz)
                     {
