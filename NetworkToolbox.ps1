@@ -70,6 +70,18 @@ $Script:config = @{
     ou1path = "az.egyes.ou/elérési/útja"
     ou2nev = "A kettes OU menüben megjelenő neve"
     ou2path = "a.kettes.ou/elérési/útja"
+    ou3nev = $False
+    ou3path = $False
+    ou4nev = $False
+    ou4path = $False
+    ou5nev = $False
+    ou5path = $False
+    ou6nev = $False
+    ou6path = $False
+    ou7nev = $False
+    ou7path = $False
+    ou8nev = $False
+    ou8path = $False
 }
 
 $Script:runtime = @{
@@ -115,18 +127,6 @@ $logEvents = @{
     notmatchingsub = "ELTÉRŐ ALHÁLÓZATOK"
     dbwriteerr = "ADATBÁZIS ÍRÁSI HIBA"
 }
-
-###################################################################################################
-###                                    FŐMENÜ BEJEGYZÉSEK                                       ###
-###################################################################################################
-
-$MainMenu = New-Object System.Collections.ArrayList($null)
-[void]$MainMenu.Add([MenuElem]::New("Egy eszköz helyének megkeresése a hálózaton", $True, $False, ${function:Get-DeviceLocation}))
-[void]$MainMenu.Add([MenuElem]::New("Egy OU minden számítógépe helyének lekérdezése, és fájlba mentése", $True, $True, ${function:Get-ADcomputersLocation}))
-[void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány minden eszköze helyének lekérdezése, és fájlba mentése", $True, $True, ${function:Get-IPrangeDevicesLocation}))
-[void]$MainMenu.Add([MenuElem]::New("Egy OU gépeinek végigpingelése, és az eredmény fájlba mentése", $False, $True, ${function:Test-ADcomputersState}))
-[void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány végigpingelése, és az eredmény fájlba mentése", ${function:Test-IPRangeState}))
-[void]$MainMenu.Add([MenuElem]::New("Egy felhasználó jelenleg használt gépének neve", $True, $True, ${function:Get-UserCurrentComputer}))
 
 ###################################################################################################
 ###                            IMPORTÁLT FÜGGVÉNYEK ÉS OSZTÁLYOK                                ###
@@ -559,7 +559,7 @@ function Show-Menu
     #               A 9 menüpontos korlátra a Get-Valasztas miatt van szükség, mivel az csak egy karaktert
     #               fogad el bemenetnek.
     #               
-    # Bemenet:      -Menu:      A menüelemeket tartalmazó ArrayList, kötelező megadni
+    # Bemenet:      -Menu:      A menüelemeket tartalmazó ArrayList, nem kötelező megadni
     #               -Exit:      Kapcsoló, amellyel megadhatjuk, hogy utolsó elemként bekerüljön-e a Kilépés menüpont
     #               -BackOne:   Kapcsoló, amellyel megadhtajuk, hogy utolsó (vagy -Exit esetén utolsó előtti) elemként bekerüljön-e a "Visszalépés az előző menübe" menüpont
     #
@@ -569,76 +569,86 @@ function Show-Menu
     ###############################################################
 
     param(
-        [Parameter(Mandatory=$true)]$Menu,
+        [Parameter(Mandatory=$false)]$Menu,
         [Switch]$Exit,
         [Switch]$BackOne
     )
 
-    Write-Host "Válassz az alábbi menüpontok közül:"
-    $i = 0
+    $valasztastomb = $null
     $valasztastomb = @()
-    $MenuToShow = $Menu.Clone() # Kell egy másolat, mert ForEach során nem lehet ArrayList-ekből törölni
-    foreach ($menuitem in $Menu)
+    if($Menu)
     {
-        $additem = $false
-        if($menuitem.Admin -or $menuitem.ActiveDirectory) # Ellenőrizzük, hogy az elemnek vannak-e jogosultság igényei
+        Write-Host "Válassz az alábbi menüpontok közül:"
+        $i = 0
+        $MenuToShow = $Menu.Clone() # Kell egy másolat, mert ForEach során nem lehet ArrayList-ekből törölni
+        foreach ($menuitem in $Menu)
         {
-            if(!$menuitem.Admin -and $menuitem.ActiveDirectory -eq $Script:runtime.adavailable)
+            $additem = $false
+            if($menuitem.Admin -or $menuitem.ActiveDirectory) # Ellenőrizzük, hogy az elemnek vannak-e jogosultság igényei
+            {
+                if(!$menuitem.Admin -and $menuitem.ActiveDirectory -eq $Script:runtime.adavailable)
+                {
+                    $additem = $true
+                }
+                elseif (!$menuitem.ActiveDirectory -and $menuitem.Admin -eq $Script:runtime.admin)
+                {
+                    $additem = $true
+                }
+                elseif ($menuitem.ActiveDirectory -eq $Script:runtime.adavailable -and $menuitem.Admin -eq $Script:runtime.admin)
+                {
+                    $additem = $true
+                }
+            }
+            elseif ($i -lt 10) # Ha az elemnek nem kell plusz jogosultság, és 10-nél kevesebb menüpont van, hozzáadjuk a listához
             {
                 $additem = $true
             }
-            elseif (!$menuitem.ActiveDirectory -and $menuitem.Admin -eq $Script:runtime.admin)
-            {
-                $additem = $true
-            }
-            elseif ($menuitem.ActiveDirectory -eq $Script:runtime.adavailable -and $menuitem.Admin -eq $Script:runtime.admin)
-            {
-                $additem = $true
-            }
-        }
-        elseif ($i -lt 10) # Ha az elemnek nem kell plusz jogosultság, és 10-nél kevesebb menüpont van, hozzáadjuk a listához
-        {
-            $additem = $true
-        }
 
-        if($additem)
-        {
-            $i++
-            Write-Host "($i) $($menuitem.Nev)"
-            $valasztastomb += $i
-        }
-        else # Ha egy elem kiszűrésre került, kivesszük a kimenetnek használt ArrayList-ből
-        {
-            $MenuToShow.Remove($menuitem)
-        }
-
-        if(($menuitem -eq $Menu[-1]) -and ($Exit -or $BackOne)) # Az utolsó menüelemet követően hozzáadjuk a lezáró menüpontokat
-        {
-            if($BackOne) # Ha szeretnénk, hogy legyen egy "Vissza" menüpont
+            if($additem)
             {
-                Write-Host "(V) Visszalépés az előző menübe"
-                $valasztastomb += "V"
+                $i++
+                Write-Host "($i) $($menuitem.Nev)"
+                $valasztastomb += $i
             }
-            if($Exit) # Ha szeretnénk, hogy legyen egy "Kilépés" menüpont
+            else # Ha egy elem kiszűrésre került, kivesszük a kimenetnek használt ArrayList-ből
             {
-                Write-Host "(K) Kilépés"
-                $valasztastomb += "K"
+                $MenuToShow.Remove($menuitem)
+            }    
+        }
+    }
+
+    if($BackOne) # Ha szeretnénk, hogy legyen egy "Vissza" menüpont
+    {
+        Write-Host "(V) Visszalépés az előző menübe"
+        $valasztastomb += "V"
+    }
+    if($Exit) # Ha szeretnénk, hogy legyen egy "Kilépés" menüpont
+    {
+        Write-Host "(K) Kilépés"
+        $valasztastomb += "K"
+    }
+
+    Show-Debug $valasztastomb.Length
+    if($valasztastomb.Length -gt 0) # Ha megadtunk bemenetet, annak kiiratása
+    {
+        $valaszt = Get-Valasztas $valasztastomb
+
+        if($valaszt -eq "K")
+        {
+            Exit
+        }
+        elseif ($valaszt -eq "V") { }
+        else
+        {
+            if($MenuToShow[$valaszt-1].Call)
+            {
+                Invoke-Expression "$($MenuToShow[$valaszt-1].Call)" # Invoke-oljuk a stringben átadott függvényt
             }
         }
     }
-    $valaszt = Get-Valasztas $valasztastomb
-
-    if($valaszt -eq "K")
+    else # Bemenet nélkül szimpla "press key to continue" funkció ellátása (duplkikált funkció, csak lekezeltem az esetleges hibát ezzel)
     {
-        Exit
-    }
-    elseif ($valaszt -eq "V")
-    {
-        Break
-    }
-    else
-    {
-        Invoke-Expression "$($MenuToShow[$valaszt-1].Call)" # Invoke-oljuk a stringben átadott függvényt
+        Get-Valasztas
     }
 }
 
@@ -1242,16 +1252,115 @@ function Start-Wait
     ###############################################################
     
     param(
-        [Parameter(Mandatory=$true)]$Seconds
+        [Parameter(Mandatory=$False)]$Seconds,
+        [Parameter(Mandatory=$False)]$Minutes,
+        [Parameter(Mandatory=$False)]$Hours,
+        [Parameter(Mandatory=$False)]$Tomorrow,
+        [Switch]$TillTime,
+        [Switch]$SkipWeekend
     )
 
-    for($i = $Seconds; $i -ge 0; $i--)
+    if([bool]$Seconds + [bool]$Minutes + [bool]$Hours + [bool]$TillTime + [bool]$Tomorrow -eq 1)
     {
-        $ts = [timespan]::FromSeconds($i)
-        $hatravan = $ts.ToString("mm':'ss")
-        Clear-Line
-        Write-Host "`rAz újrapróbálkozásig még $hatravan" -NoNewline
-        Start-Sleep -Seconds 1
+        if($Seconds)
+        {
+            $vissza = $Seconds
+        }
+        elseif($Minutes)
+        {
+            $vissza = ([TimeSpan]::FromMinutes($Minutes)).TotalSeconds
+        }
+        elseif($Hours)
+        {
+            $vissza = ([TimeSpan]::FromHours($Hours)).TotalSeconds
+        }
+
+        elseif($TillTime)
+        {
+            do # Ez a do-while ciklus addig fut, míg meg nem kapja a hét kiválasztott napjának dátumát
+            {
+                $inditas = (Get-Date).AddDays($nap)
+                if($most.DayOfWeek -eq $Script:config.kezdonap) # Ha az indításként megadott nap megegyezik a mával
+                {
+                    if($most.Hour -lt $Script:config.kezdoora) # Ha az indításként megadott óra még nem jött el
+                    {
+                        $inditas = Get-Date
+                    }
+                    else
+                    {
+                        $inditas = (Get-Date).AddDays(7) # Ha az indítási nap megegyezik a mával, de az óra elmúlt, +1 hét
+                    }
+                }
+                else
+                {
+                    $nap++
+                    if ($nap -gt 7) # Ha a ciklus lefut 7-szer eredmény nélkül, úgy hibás a megadott nap neve, ami végtelen ciklust eredményezne
+                    {
+                        Write-Host "A config fájlban hibásan lett megadva a kezdési nap. Javítsd ki, majd futtasd újra a programot!" -ForegroundColor Red
+                        Read-Host
+                        Exit # A hibaüzenetet követően a program leáll
+                    }
+                }
+            } while($inditas.DayOfWeek -ne $Script:config.kezdonap)
+
+            $inditas = ($inditas.Date).AddHours($Script:config.kezdoora) # Megadjuk az indítás óráját
+        }
+        elseif($Tomorrow)
+        {
+            $most = Get-Date
+            $inditas = (Get-Date).AddDays(1)
+            if($SkipWeekend -and (($inditas.DayOfWeek -eq "Saturday") -or ($inditas.DayOfWeek -eq "Sunday")))
+            {
+                if($inditas.DayOfWeek -eq "Saturday")
+                {
+                    $inditas = $inditas.AddDays(2)
+                }
+                else
+                {
+                    $inditas = $inditas.AddDays(1)
+                }
+            }
+            $inditas = ($inditas.Date).AddHours($Tomorrow)
+        }
+        
+        if($Seconds -or $Minutes)
+        {
+            for($i = $vissza; $i -ge 0; $i--)
+            {
+                $ts = [TimeSpan]::FromSeconds($i)
+                $hatravan = $ts.ToString("mm':'ss")
+                Clear-Line
+                Write-Host "`rAz újrapróbálkozásig még $hatravan" -NoNewline
+                Start-Sleep -Seconds 1
+            }
+        }
+        elseif($Hours)
+        {
+            for($i = $vissza; $i -ge 0; $i--)
+            {
+                $ts = [TimeSpan]::FromSeconds($i)
+                $hatravan = $ts.ToString("hh':'mm':'ss")
+                Clear-Line
+                Write-Host "`rAz újrapróbálkozásig még $hatravan" -NoNewline
+                Start-Sleep -Seconds 1
+            }
+        }
+        else
+        {
+            $ido = $inditas - $most
+            for($i = $ido.TotalSeconds; $i -ge 0; $i--)
+            {
+                $ts = [timespan]::FromSeconds($i)
+                $hatravan = $ts.ToString("d' nap, 'hh':'mm':'ss")
+                
+                Write-Host "`rA folyamat megkezdéséig még hátravan $hatravan" -NoNewline
+                Start-Sleep -s 1
+            }
+        }
+    }
+    else
+    {
+        Write-Host "A megengedettnél több, vagy kevesebb érvényes bemenetet adtál meg!" -ForegroundColor Red
     }
 }
 
@@ -1474,9 +1583,6 @@ function Get-UtolsoUser
 
 Class CSV
 {
-    ### A most készülő változatban a program már SQLite adatbázisba fog menteni,
-    ### és onnan olvassa ki a használni kívánt 
-    
     $Nev
     $kimenet
 
@@ -1486,15 +1592,16 @@ Class CSV
         $this.kimenet = "$($Script:config.csvkonyvtar)\VÉGEREDMÉNY_$($this.Nev)"
     }
 
-    Sync($eszkoz)
+    Sync($eszkoz, $id)
     {
-        # Az eredményt CSV-be író metódus. Ellenőrzi, hogy létezik-e már a fájlban a jelenlegi eszköz bejegyzése,
-        # ha nem, beleírja.
+        # Az eredményt CSV-be író metódus. Először ellenőrzi, hogy létezik-e a fájl, és létrehozza, ha nem.
+        # Aztán ellenőrzi, hogy benne van-e az adott menteni kívánt elem, ha nem, beleírja.
+        # Végül, ha az elem már benne volt, felülírja azt az újjal.
         if(!(Test-Path $this.kimenet))
         {
             $eszkoz | Export-Csv -encoding UTF8 -path $this.kimenet -NoTypeInformation -Append -Force -Delimiter ";"
         }
-        elseif(!(Select-String -Path $this.kimenet -Pattern $eszkoz.IPaddress))
+        elseif(!(Select-String -Path $this.kimenet -Pattern $eszkoz.$id))
         {
             $eszkoz | Export-Csv -encoding UTF8 -path $this.kimenet -NoTypeInformation -Append -Force -Delimiter ";"
         }
@@ -1505,13 +1612,13 @@ Class CSV
             $update = New-Object System.Collections.ArrayList($null)
             foreach ($sor in $csvdata)
             {
-                if($sor.IPaddress -ne $eszkoz.IPaddress)
+                if($sor.$id -ne $eszkoz.$id)
                 {
                     [Void]$update.Add($sor)
                 }
             }
             [Void]$update.Add($eszkoz)
-            $update | Export-Csv -encoding UTF8 -path $this.kimenet -NoTypeInformation -Append -Force -Delimiter ";"
+            $update | Export-Csv -encoding UTF8 -path $this.kimenet -NoTypeInformation -Force -Delimiter ";"
         }
     }
 }
@@ -1525,31 +1632,19 @@ Class Eszkoz
     $SwitchIP
     $Port
     $Felhasznalo
+    $Megjegyzes
     hidden $Tablanev
     hidden $Finished
     hidden $DBid
     hidden $DBidValue
+    hidden $Local
+    hidden $Remote
+    hidden $Lekerdezes
+    hidden $Sorok
 
     Eszkoz()
     {
         $this.Finished = $False
-    }
-
-    Eszkoz($Eszkoznev, $IPaddress, $MACaddress, $SwitchNev, $SwitchIP, $Port, $Felhasznalo)
-    {
-        $this.Eszkoznev = $Eszkoznev
-        $this.IPaddress = $IPaddress
-        $this.MACaddress = $MACaddress
-        $this.SwitchNev = $SwitchNev
-        $this.SwitchIP = $SwitchIP
-        $this.Port = $Port
-        $this.Felhasznalo = $Felhasznalo
-    }
-    
-    Eszkoz($IP, $eszkoznev)
-    {
-        $this.IPaddress = $IP
-        $this.Eszkoznev = $eszkoznev
     }
 
     Eszkoz($bemenet)
@@ -1562,6 +1657,24 @@ Class Eszkoz
         {
             $this.Eszkoznev = $bemenet
         }
+    }
+
+    Eszkoz($IP, $eszkoznev)
+    {
+        $this.IPaddress = $IP
+        $this.Eszkoznev = $eszkoznev
+    }
+
+    Eszkoz($Eszkoznev, $IPaddress, $MACaddress, $SwitchNev, $SwitchIP, $Port, $Felhasznalo, $Megjegyzes)
+    {
+        $this.Eszkoznev = $Eszkoznev
+        $this.IPaddress = $IPaddress
+        $this.MACaddress = $MACaddress
+        $this.SwitchNev = $SwitchNev
+        $this.SwitchIP = $SwitchIP
+        $this.Port = $Port
+        $this.Felhasznalo = $Felhasznalo
+        $this.Megjegyzes = $Megjegyzes
     }
 
     SetNev()
@@ -1620,7 +1733,7 @@ Class Eszkoz
         }
     }
 
-#### ADATBÁZIS FUNKCIÓK ####
+#### ADATBÁZIS METÓDUSOK ####
     SetTableName($ounev)
     {
         $this.Tablanev = [SQL]::SetTableName("Eszkoz", $ounev)
@@ -1657,15 +1770,16 @@ Class Eszkoz
             Port = "varchar(255)"
             Felhasznalo = "varchar(255)"
             Finished = "varchar(255)"
+            Megjegyzes = "varchar(255)"
           }                     
         $script:runtime.sql.CreateTable($this.Tablanev, $attribhash)
     }
 
     AddRecord()
     {
-        $commandtext = "INSERT INTO $($this.Tablanev) (Eszkoznev, IPaddress, MACaddress, SwitchNev, SwitchIP, Port, Felhasznalo, Finished) Values (@Eszkoznev, @IPaddress, @MACaddress, @SwitchNev, @SwitchIP, @Port, @Felhasznalo, @Finished)"
-        $attribnames = @("@Eszkoznev", "@IPaddress", "@MACaddress", "@SwitchNev", "@SwitchIP", "@Port", "@Felhasznalo", "@Finished")
-        $values = @($this.Eszkoznev, $this.IPaddress, $this.MACaddress, $this.SwitchNev, $this.SwitchIP, $this.Port, $this.Felhasznalo, $this.Finished)
+        $commandtext = "INSERT INTO $($this.Tablanev) (Eszkoznev, IPaddress, MACaddress, SwitchNev, SwitchIP, Port, Felhasznalo, Finished, Megjegyzes) Values (@Eszkoznev, @IPaddress, @MACaddress, @SwitchNev, @SwitchIP, @Port, @Felhasznalo, @Finished, @Megjegyzes)"
+        $attribnames = @("@Eszkoznev", "@IPaddress", "@MACaddress", "@SwitchNev", "@SwitchIP", "@Port", "@Felhasznalo", "@Finished", "@Megjegyzes")
+        $values = @($this.Eszkoznev, $this.IPaddress, $this.MACaddress, $this.SwitchNev, $this.SwitchIP, $this.Port, $this.Felhasznalo, $this.Finished, $this.Megjegyzes)
 
         $script:runtime.sql.AddRecord($commandtext, $attribnames, $values)
     }
@@ -1698,12 +1812,185 @@ Class Eszkoz
         $this.UpdateValue("Port", $this.Port)
         $this.UpdateValue("Felhasznalo", $this.Felhasznalo)
         $this.UpdateValue("Finished", $this.Finished)
+        $this.UpdateValue("Megjegyzes", $this.Megjegyzes)
     }
 
     DeleteRecord($attrib, $value)
     {
         $commandtext = "DELETE FROM $($this.tablanev) WHERE $attrib LIKE '$value'"
         $script:runtime.sql.QueryTable($commandtext)
+    }
+
+#### SWITCH LEKÉRDEZÉS METÓDUSOK ####
+    Lekerdez($keresesiparancs, $local, $remote)
+    {
+        $this.Local = $local
+        $this.Remote = $remote
+        $failcount = 0
+        $pinglocal = "ping $($local.IPaddress)"
+        $pingremote = "ping $($remote.IPaddress)"
+        $this.Lekerdezes = $false
+        $this.IPaddress = $remote.IPaddress
+        $this.MACaddress = $remote.MACaddress
+        if(!$this.Eszkoznev)
+        {
+            if($remote.Eszkoznev)
+            {
+                $this.Eszkoznev = $Remote.Eszkoznev
+            }
+            else
+            {
+                $this.SetNev()
+            }
+        }
+        $result = $null
+        [String[]]$parancs = @($pinglocal, $pingremote, $keresesiparancs)
+        $waittimeorig = $script:config.waittime
+        do
+        {
+            Out-Result "A(z) $($this.IPaddress) IP című eszköz helyének lekérdezése folyamatban..." -Overwrite
+            $result = [Telnet]::InvokeCommands($parancs)
+            Show-Debug $result
+            if(!$result)
+            {
+                Out-Result -Text "A(z) $($this.IPaddress) című eszköz lekérdezése során a programnak nem sikerült csatlakozni a(z) $($script:config.switch) IP című switchhez!" -Tag "conerr" -Level "err"
+            }
+            elseif ($result | Select-String -Pattern "trace completed")
+            {
+                $This.Lekerdezes = $True
+                Show-Debug "Az útvonal lekérése sikeres"
+            }
+            if ($result | Select-String -Pattern "trace aborted")
+            {
+                Show-Debug "Az útvonal lekérése sikertelen nem próbálkozom újra"
+                $failcount = $script:config.maxhiba
+            }
+            elseif (!$this.Lekerdezes -and $failcount -lt $script:config.maxhiba)
+            {
+                Show-Debug "Az útvonal lekérése sikertelen, újrapróbálkozom hosszabb idővel, ami jelenleg: $($script:config.waittime) ezredmásodperc"
+                $failcount++
+                $visszamaradt = $script:config.maxhiba - $failcount
+                Out-Result -Text "A(z) $($this.IPaddress) eszköz helyének lekérdezése most nem járt sikerrel. Még $visszamaradt alkalommal újrapróbálkozom!" -Level "warn" -Tag "timeout"
+                if ($failcount -eq $script:config.maxhiba)
+                {
+                    Out-Result -Text "A(z) $($this.IPaddress) eszköz helyének lekérdezése a(z) $($script:config.switch) IP című switchről időtúllépés miatt nem sikerült" -Tag "timeout" -Level "err"
+                    Show-Debug $this.result
+                }
+                $script:config.waittime = $script:config.waittime + 1000
+            }
+        }while (!$this.Lekerdezes -and $failcount -lt $script:config.maxhiba)
+        $script:config.waittime = $waittimeorig
+        if($this.Lekerdezes)
+        {
+            $this.Feldolgoz($result)
+        }
+        else
+        {
+            $this.Hibakeres($result)
+        }
+    }
+
+    Feldolgoz($result)
+    {
+        $eszkozhely = 0
+        $sajateszkoz = 0
+        $this.Sorok = $result.Split("`r`n")
+        for ($i = 0; $i -lt $this.Sorok.Length; $i++)
+        {
+            if ($this.Sorok[$i] | Select-String -pattern "=>")
+            {
+                if ($sajateszkoz -eq 0)
+                {
+                    $sajateszkoz = $i
+                }
+                $eszkozhely = $i
+            }
+        }
+        
+        $utolsosor = $this.Sorok[$eszkozhely].Split(" ")
+        $this.SwitchNev = $utolsosor[1]
+        $this.SwitchIP = $utolsosor[2]
+        $this.Port = $utolsosor[6]
+        if(!$this.Local.Kesz())
+        {
+            $elsosor = $this.Sorok[$sajateszkoz].Split(" ")
+            $this.Local.SwitchNev = $elsosor[1]
+            $this.Local.SwitchIP = $elsosor[2]
+            $this.Local.Port = $elsosor[4]
+        }
+        $this.Log()
+    }
+
+    Hibakeres($result)
+    {
+        Show-Debug "Eredmény hibakeresés"
+        Show-Debug $result
+        $this.Local.Megbizhato = $false
+        if($result | Select-String -Pattern "Unable to locate port for")
+        {
+            Show-Debug "Unable to locate port hiba"
+            $this.Sorok = $result.Split("`r`n")
+            foreach ($sor in $this.Sorok)
+            {
+                if ($sor | Select-String -Pattern "Unable to locate port for")
+                {
+                    Show-Debug "Az eszköz megtalálva"
+                    $eredmeny = $sor.Split(" ")
+                    $this.SwitchNev = $eredmeny[8]
+                    $this.SwitchIP = $eredmeny[9]
+                    $this.Megjegyzes = "Az eszköz valószínűleg egy nem Catalyst switchez kapcsolódik fizikálisan (HP, vagy Cisco SF széria)"
+                    Out-Result -Text "A(z) $($this.Remote.IPaddress) eszköz helye a $($this.SwitchNev) ($($this.SwitchIP)) switchig követhető vissza, a pontos port lekérése hibába ütközött" -Tag "routeerr" -Level "warn"
+                    Break
+                }
+            }
+        }
+    
+        elseif ($result | Select-String -Pattern "Success rate is 0 percent")
+        {
+            if($this.Remote.Allapot() -and $this.Local.Allapot())
+            {
+                $this.Megjegyzes = "Az eszköz online, de a switchről valamiért nem érhető el"
+                Out-Result -Text $this.Megjegyzes -Tag "unreachable" -Level "err"
+            }
+            else
+            {
+                Out-Result -Text "A lekérdezni kívánt, vagy a kiinduló gép nem volt elérhető" -Tag "unreachable" -Level "err"
+            }
+        }
+        elseif($result | Select-String -Pattern "Mac address not found")
+        {
+            Out-Result -Text "A(z) $($this.Remote.IPaddress) eszköz ARP tábla hiba miatt nem lekérdezhető" -Level "err" -Tag "arperr"
+        }
+        else
+        {
+            Add-Log -Text $result -Tag "err"
+        }
+    }
+
+    Kiirat()
+    {
+        $consolout = $null
+        foreach ($sor in $this.sorok)
+        {
+            if ($sor | Select-String -pattern "=>")
+            {
+                $consolout += "$sor`n"
+            }
+        }
+        Show-Cimsor "ESZKÖZ FIZIKAI HELYÉNEK MEGKERESÉSE"
+        Write-Host "Az adatcsomagok útja erről az eszközről a(z) $($this.IPaddress) IP című eszközig:"
+        Write-Host $consolout
+        Write-Host "A keresett eszköz a(z) $($this.SwitchNev) $($this.SwitchIP) switch $($this.Port) portján található." -ForegroundColor Green
+    }
+
+    Log()
+    {
+        Add-Log -Text "A(z) $($this.remote.IPaddress) IP című eszköz a(z) $($this.switchnev) $($this.switchip) switch $($this.eszkozport) portján található." -Tag "success"
+    }
+
+    [bool]Siker()
+    {
+        return $this.Lekerdezes
     }
 }
 
@@ -1777,7 +2064,7 @@ Class Local
         }
     }
 
-    [bool]Kesze()
+    [bool]Kesz()
     {
         if(!$this.SwitchNev)
         {
@@ -1786,6 +2073,19 @@ Class Local
         else
         {
             return $true
+        }
+    }
+
+    [bool]Allapot()
+    {
+        if(Test-Connection $this.SwitchIP -Quiet -Count 1)
+        {
+            Return $True
+
+        }
+        else
+        {
+            Return $False
         }
     }
 
@@ -1820,6 +2120,7 @@ Class Remote
     [string]$IPaddress
     [string]$MACaddress
     $Online
+    hidden $EszkozID
 
     Remote()
     {
@@ -1828,31 +2129,32 @@ Class Remote
 
     Remote($keresetteszkoz)
     {
-        $this.AdatKitolt($keresetteszkoz)
+        $this.EszkozID = $keresetteszkoz
+        $this.AdatKitolt()
     }
 
     AdatBeker()
     {
-        $keresetteszkoz = Read-Host -Prompt "Keresett eszköz IP címe, vagy neve"
-        $this.AdatKitolt($keresetteszkoz)
+        $this.EszkozID= Read-Host -Prompt "Keresett eszköz IP címe, vagy neve"
+        $this.AdatKitolt()
     }
 
-    AdatKitolt($keresetteszkoz)
+    AdatKitolt()
     {
-        if([IPcim]::CheckPattern($keresetteszkoz))
+        if([IPcim]::CheckPattern($this.EszkozID))
         {
-            $this.IPaddress = $keresetteszkoz
+            $this.IPaddress = $this.EszkozID
         }
         else
         {
-            $this.Eszkoznev = $keresetteszkoz
+            $this.Eszkoznev = $this.EszkozID
             try
             {
-                $this.GetIP($keresetteszkoz)
+                $this.GetIP($this.EszkozID)
             }
             catch { }
         }
-        $this.Allapot($keresetteszkoz)
+        $this.Allapot()
     }
 
     GetMAC()
@@ -1911,12 +2213,12 @@ Class Remote
         }
     }
 
-    [bool]Allapot($keresetteszkoz)
+    [bool]Allapot()
     {
-        $this.Online = (Test-Connection $keresetteszkoz -Quiet -Count 1)
+        $this.Online = (Test-Connection $this.EszkozID -Quiet -Count 1)
         if(!$this.Online)
         {
-            Out-Result -Text "A(z) $keresetteszkoz eszköz jelenleg nem elérhető" -Tag "down" -Level "warn" -Overwrite
+            Out-Result -Text "A(z) $($this.EszkozID) eszköz jelenleg nem elérhető" -Tag "down" -Level "warn" -Overwrite
         }
         return $this.Online
     }
@@ -2274,12 +2576,12 @@ Class MasVLAN
 
 Class Telnet
 {
-    Static $felhasznalonev = $null
-    Static $jelszo = $null
+    Static $Felhasznalonev = $null
+    Static $Jelszo = $null
     Static $nonroot
     Static Login()
     {
-        if (![Telnet]::felhasznalonev -or ![Telnet]::jelszo)
+        if (![Telnet]::Felhasznalonev -or ![Telnet]::Jelszo)
         {
             $login = $false
             do
@@ -2390,11 +2692,13 @@ Class Telnet
         }
         catch
         {
+            Show-Debug "Socket HIBA"
             $result = $false
         }
     
         if($socket)
         {
+            Show-Debug "Socket Stimt"
             $stream = $socket.GetStream()
             $writer = New-Object System.IO.StreamWriter($stream)
             $buffer = New-Object System.Byte[] 1024
@@ -2425,228 +2729,6 @@ Class Telnet
         }
     
         return $result
-    }
-}
-
-Class Parancs
-{
-    Static [Object]TraceRTHibaJavitassal($local, $remote)
-    {
-        $result = $false
-        do
-        {
-            $remote.GetMAC()
-            $result = [Parancs]::TraceRT($local, $remote)
-            if(!$result)
-            {
-                $remote.AdatBeker()
-            }
-        }while(!$result)
-        return $result
-    }
-    
-    Static [Object]TraceRT($local, $remote)
-    {
-        if(!($remote.IPaddress -eq $local.IPaddress)) #(!($remote.IPaddress | Select-String -pattern $($local.IPaddress))) ### Hibaforrás lehet. Ellenőrizni!!!
-        {
-            if($remote.MACaddress)
-            {
-                $result = "traceroute mac $($local.MACaddress) $($remote.MACaddress)"
-            }
-            else
-            {
-                $result = $false
-            }
-        }
-        else
-        {
-            $message = "A kereséshez kiindulásként használt $($local.IPaddress) eszköz IP címe megegyezik a keresett eszköz ($($remote.IPaddress)) IP címével. A keresés nem hajtható végre"
-            Add-Log -Text $message -Tag "ipmatch"
-            Write-Host "`r$message" -ForegroundColor Red
-            $result = $false
-        }
-        return $result
-    }
-}
-
-Class Lekerdezes
-{
-    $sikeres
-    $result
-    $switchnev
-    $switchip
-    $eszkozport
-    $sorok
-    $local
-    $remote
-
-    Lekerdezes($keresesiparancs, $local, $remote)
-    {
-        $this.local = $local
-        $this.remote = $remote
-        $failcount = 0
-        $pinglocal = "ping $($local.IPaddress)"
-        $pingremote = "ping $($remote.IPaddress)"
-        [String[]]$parancs = @($pinglocal, $pingremote, $keresesiparancs)
-        $waittimeorig = $script:config.waittime
-        do
-        {
-            Write-Host "`rA(z) $($remote.IPaddress) IP című eszköz helyének lekérdezése folyamatban..."
-            $this.result = [Telnet]::InvokeCommands($parancs)
-            if(!$this.result)
-            {
-                $message = "A(z) $($remote.IPaddress) című eszköz lekérdezése során a programnak nem sikerült csatlakozni a(z) $($script:config.switch) IP című switchhez!"
-                Add-Log -Text $message -Tag "conerr"
-                Write-Host $message -ForegroundColor Red
-            }
-            elseif ($this.result | Select-String -Pattern "trace completed")
-            {
-                Show-Debug "Az útvonal lekérése sikeres"
-                $this.sikeres = $true
-            }
-            if ($this.result | Select-String -Pattern "trace aborted")
-            {
-                Show-Debug "Az útvonal lekérése sikertelen nem próbálkozom újra"
-                $this.sikeres = $false
-                $failcount = $script:config.maxhiba
-            }
-            elseif (!$this.Siker() -and $failcount -lt $script:config.maxhiba)
-            {
-                Show-Debug "Az útvonal lekérése sikertelen, újrapróbálkozom hosszabb idővel, ami jelenleg: $($script:config.waittime) ezredmásodperc"
-                $failcount++
-                $visszamaradt = $script:config.maxhiba - $failcount
-                Write-Host "A(z) $($remote.IPaddress) eszköz helyének lekérdezése most nem járt sikerrel. Még $visszamaradt alkalommal újrapróbálkozom!" -ForegroundColor Yellow
-                if ($failcount -eq $script:config.maxhiba)
-                {
-                    $message = "A(z) $($remote.IPaddress) eszköz helyének lekérdezése a(z) $($script:config.switch) IP című switchről időtúllépés miatt nem sikerült"
-                    Write-Host $message -ForegroundColor Red
-                    Add-Log -Text $message -Tag "timeout"
-                    #Write-Host $this.result
-                }
-                $script:config.waittime = $script:config.waittime + 1000
-            }
-        }while (!$this.Siker() -and $failcount -lt $script:config.maxhiba)
-        $script:config.waittime = $waittimeorig
-        if($this.Siker())
-        {
-            $this.Feldolgoz()
-        }
-        else
-        {
-            $this.Hibakeres()
-        }
-    }
-
-    Feldolgoz()
-    {
-        $eszkozhely = 0
-        $sajateszkoz = 0
-        $this.sorok = $this.result.Split("`r`n")
-        for ($i = 0; $i -lt $this.sorok.Length; $i++)
-        {
-            if ($this.sorok[$i] | Select-String -pattern "=>")
-            {
-                if ($sajateszkoz -eq 0)
-                {
-                    $sajateszkoz = $i
-                }
-                $eszkozhely = $i
-            }
-        }
-        
-        $utolsosor = $this.sorok[$eszkozhely].Split(" ")
-        $this.switchnev = $utolsosor[1]
-        $this.switchip = $utolsosor[2]
-        $this.eszkozport = $utolsosor[6]
-        if(!$this.local.Kesze())
-        {
-            $elsosor = $this.sorok[$sajateszkoz].Split(" ")
-            $this.local.switchnev = $elsosor[1]
-            $this.local.switchip = $elsosor[2]
-            $this.local.port = $elsosor[4]
-        }
-        $this.Log()
-    }
-
-    Hibakeres()
-    {
-        Show-Debug "Eredmény hibakeresés"
-        $this.local.Megbizhato = $false
-        if($this.result | Select-String -Pattern "Unable to locate port for")
-        {
-            Show-Debug "Unable to locate port hiba"
-            $this.sorok = $this.result.Split("`r`n")
-            foreach ($sor in $this.sorok)
-            {
-                if ($sor | Select-String -Pattern "Unable to locate port for")
-                {
-                    Show-Debug "Az eszköz megtalálva"
-                    $eredmeny = $sor.Split(" ")
-                    $this.switchnev = $eredmeny[8]
-                    $this.switchip = $eredmeny[9]
-                    $message = "A(z) $($this.remote.IPaddress) eszköz a $($this.switchnev) switchen található, a pontos port lekérése hibába ütközött"
-                    Add-Log -Text $message -Tag "routeerr"
-                    Write-Host $message -ForegroundColor Yellow
-                    Break
-                }
-            }
-        }
-        elseif ($this.result | Select-String -Pattern "Success rate is 0 percent")
-        {
-            $message = "A lekérdezni kívánt, vagy a kiinduló gép nem volt elérhető"
-            Add-Log -Text $message -Tag "unreachable"
-            Write-Host "$message!" -ForegroundColor Red
-        }
-        elseif($this.result | Select-String -Pattern "Mac address not found")
-        {
-            $message = "A(z) $($this.remote.IPaddress) eszköz ARP tábla hiba miatt nem lekérdezhető"
-            Add-Log -Text $message -Tag "arperr"
-            Write-Host "$message!" -ForegroundColor Red
-        }
-        else
-        {
-            Show-Debug $this.result
-            Add-Log -Text $this.result -Tag "err"
-        }
-    }
-
-    Kiirat()
-    {
-        $consolout = $null
-        foreach ($sor in $this.sorok)
-        {
-            if ($sor | Select-String -pattern "=>")
-            {
-                $consolout += "$sor`n"
-            }
-        }
-        Show-Cimsor "ESZKÖZ FIZIKAI HELYÉNEK MEGKERESÉSE"
-        Write-Host "Az adatcsomagok útja erről az eszközről a(z) $($this.remote.IPaddress) IP című eszközig:"
-        Write-Host $consolout
-        Write-Host "A keresett eszköz a(z) $($this.switchnev) $($this.switchip) switch $($this.eszkozport) portján található." -ForegroundColor Green
-    }
-
-    ObjektumKitolto($eszkoz)
-    {
-        $eszkoz.SetSwitchNev($this.switchnev)
-        $eszkoz.SetSwitchIP($this.switchip)
-        $eszkoz.SetPort($this.eszkozport)
-        $eszkoz.SetIP($this.remote.IPaddress)
-        $eszkoz.SetMAC($this.remote.MACaddress)
-        if(!$eszkoz.Eszkoznev)
-        {
-            $eszkoz.SetNev()
-        }
-    }
-
-    Log()
-    {
-        Add-Log -Text "A(z) $($this.remote.IPaddress) IP című eszköz a(z) $($this.switchnev) $($this.switchip) switch $($this.eszkozport) portján található." -Tag "success"
-    }
-
-    [bool]Siker()
-    {
-        return $this.sikeres
     }
 }
 
@@ -3006,7 +3088,7 @@ function Get-UserLevel
     #
     # Bemenet:      Nincs
     #
-    # Kimenet:      $True ha a programot admin joggal futtatják, $False-t, ha nem
+    # Kimenet:      $True ha a programot admin joggal futtatják, $False, ha nem
     #
     # Függőségek:   Nincs
     #
@@ -3103,7 +3185,7 @@ function Show-Cimsor
 
     param([Parameter(Mandatory=$true)]$Almenu)
     Clear-Host
-    Write-Host "HÁLÓZATKEZELÉSI ESZKÖZTÁR`n`n$Almenu`n`n"
+    Write-Host "HÁLÓZATKEZELÉSI ESZKÖZTÁR`n$Almenu`n"
 }
 
 # Tiszta
@@ -3361,6 +3443,55 @@ function Compare-Subnets
     return $samesubnet
 }
 
+# Tiszta
+function Format-TracertCommand
+{
+    ###############################################################
+    #
+    # Leírás:       A switchen futtatandó layer2 tracert parancsot létrehozó függvény.
+    #               Osztályból lett átírva függvénnyé, mert sosem használta ki az osztály plusz képességeit
+    #               a könnyebben kezelhető függvényekkel szemben.
+    #
+    # Bemenet:      -Local:         A kiindulóként használt [Local] objektum, kötelező megadni
+    #               -Remote:        A megtalálni kívánt [Remote] objektum, kötelező megadni
+    #               -Hibajavitas:   Kapcsoló, ezzel választható ki, hogy 
+    #
+    # Kimenet:      A switchen futtatandó parancs, vagy $null
+    #
+    # Függőségek:   Nincs
+    #
+    ###############################################################
+    param(
+        [Parameter(Mandatory=$true)]$Local,
+        [Parameter(Mandatory=$true)]$Remote,
+        [Switch]$Hibajavitas
+    )
+
+    $result = $null
+    do
+    {
+        $Remote.GetMAC()
+        if(!($Remote.IPaddress -eq $Local.IPaddress))
+        {
+            if($Remote.MACaddress)
+            {
+                $result = "traceroute mac $($Local.MACaddress) $($Remote.MACaddress)"
+            }
+        }
+        else
+        {
+            Out-Result -Text "A kereséshez kiindulásként használt $($local.IPaddress) eszköz IP címe megegyezik a keresett eszköz ($($remote.IPaddress)) IP címével. A keresés nem hajtható végre" -Tag "ipmatch" -Level "err"
+        }
+
+        if($Hibajavitas -and !$result)
+        {
+            $Remote.AdatBeker()
+        }
+    } while($Hibajavitas -and !$result)
+
+    Return $result
+}
+
 #####
 ##
 ##  Összetett kisegítőfüggvények. Ezek a függvényeket összetettebb,
@@ -3479,7 +3610,7 @@ function Out-LocalToUse
 ##
 #####
 
-##### KÉSZ, TESZTELÉSRE VÁR !!!!!!!!!!!!!!
+######### ELLENŐRIZVE, KÉSZ !!!!!!!!!!!!!!!!!!!!!!!!!
 function Get-DeviceLocation
 {
     ###############################################################
@@ -3501,15 +3632,14 @@ function Get-DeviceLocation
     #               * Local osztály
     #               * Remote osztály
     #               * Eszkoz osztály
-    #               * Parancs osztály
     #               * Telnet osztály
     #               * Lekerdezes osztály
     #
-    # Megnézni:     [Parancs] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
+    # Megnézni:     [Eszkoz] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
     #
     ###############################################################
 
-    Show-Cimsor "EGYETLEN ESZKÖZ MEGKERESÉSE"
+    Show-Cimsor "Egyetlen eszköz megkeresése"
     Set-Logname "EszkozHely"
     $local = [Local]::New()
     do
@@ -3518,7 +3648,7 @@ function Get-DeviceLocation
 
         if($remote.Elerheto())
         {
-            $keresesiparancs = [Parancs]::TraceRTHibaJavitassal($local, $remote)
+            $keresesiparancs = Format-TracertCommand -Local $local -Remote $remote -Hibajavitas
         }
         else
         {
@@ -3526,10 +3656,12 @@ function Get-DeviceLocation
         }
     }while(!$keresesiparancs -or !$remote.Elerheto())
 
-    $lekerdezes = [Lekerdezes]::New($keresesiparancs, $local, $remote)
-    if($lekerdezes.Siker())
+    [Telnet]::Login()
+    $eszkoz = [Eszkoz]::New($remote.IPAddress)
+    $eszkoz.Lekerdez($keresesiparancs, $local, $remote)
+    if($eszkoz.Siker())
     {
-        $lekerdezes.Kiirat()
+        $eszkoz.Kiirat()
     }
     else
     {
@@ -3538,6 +3670,8 @@ function Get-DeviceLocation
         Write-Host "Keresési parancs:       $($keresesiparancs) (automatikusan a vágólapra másolva)`n"
         Set-Clipboard $keresesiparancs
     }
+    Out-Result -Text "A folyamat végetért"
+    Show-Menu -Exit -BackOne
 }
 
 ######### ELLENŐRIZVE, JELEN FUNKCIÓJÁT TEKINTVE KÉSZ
@@ -3573,7 +3707,7 @@ function Get-ADcomputersLocation
     #               * Telnet osztály
     #               * Lekerdezes osztály
     #
-    # Megnézni:     [Parancs] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
+    # Megnézni:     [Eszkoz] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
     #
     ###############################################################
 
@@ -3648,8 +3782,7 @@ function Get-ADcomputersLocation
                         $localtouse = Get-Local -Local $local -Remote $remote # Meghívjuk a függvényt, ami kiválasztja a VLAN-hoz tartozó, kiindulónak használt eszközt
                         if($localtouse) 
                         {
-                            $remote.GetMAC() # Begyűjtjük a távoli eszköz MACaddressét
-                            $keresesiparancs = [Parancs]::TraceRT($localtouse, $remote)
+                            $keresesiparancs = Format-TracertCommand -Local $local -Remote $remote
                             Show-Debug $keresesiparancs
                         }
                         else # Ha nincs kiindulónak használt eszköz (pl mert más vlan-on van, mint a lekért) kilépünk
@@ -3658,12 +3791,11 @@ function Get-ADcomputersLocation
                         }
                         if($keresesiparancs) # Ha létre lehetett hozni parancsot, futtatjuk a lekérdezést
                         {
-                            $lekerdezes = [Lekerdezes]::New($keresesiparancs, $localtouse, $remote)
                             $eszkoz.SetTableName($Script:config.ounev) # Beállítjuk az [Eszkoz] objektumon, hogy melyik adattáblába próbálja beírni magát
-                            if($lekerdezes.Siker()) # Ha sikeres volt a lekérdezés
+                            $eszkoz.Lekerdez($keresesiparancs, $localtouse, $remote)
+                            if($eszkoz.Lekerdezes) # Ha sikeres volt a lekérdezés
                             {
                                 Show-Debug "Lekérdezés sikeres"
-                                $lekerdezes.ObjektumKitolto($eszkoz) # A lekérdezés által gyüjtöttekkel kitöltjük az [Eszkoz] objektumot
                                 $eszkoz.SetFelhasznalo() # Meghívjuk az [Eszkoz] metódusát, ami kikeresi a jelenlegi felhasználót
                                 $csv.Sync($eszkoz) # Az eredményt fájlba írjuk
                                 $eszkoz.Finished = $True # Befejezettnek állítjuk be az objektumot
@@ -3678,10 +3810,9 @@ function Get-ADcomputersLocation
                                     $templist.Remove($sajateszkoz) # Kitöröljük a már kész [Eszkoz]-t a templist tömbből
                                 }
                             }
-                            elseif ($lekerdezes.switchnev) # Ha a lekérdezés legalább a switch nevét megtalálta, részleges adatkitöltés történik
+                            elseif ($eszkoz.SwitchNev) # Ha a lekérdezés legalább a switch nevét megtalálta, részleges adatkitöltés történik
                             {
                                 Show-Debug "Adatok részleges kitöltése"
-                                $lekerdezes.ObjektumKitolto($eszkoz)
                                 $eszkoz.SetFelhasznalo()
                                 $eszkoz.Finished = $False
                                 $eszkoz.UpdateRecord()
@@ -3708,21 +3839,27 @@ function Get-ADcomputersLocation
             if ($templist.Count -gt 0)
             {
                 Out-Result -Text "A(z) $($Script:config.ounev) OU számítógépei helyének egy lekérdezés ciklusa befejeződött." -Tag "end"
-                Out-Result -Text "A ciklus újraindul $($Script:config.retrytime) másodperc múlva"
-                Start-Wait -Seconds $Script:config.retrytime
+                if((Get-Date).Hour -lt 16)
+                {
+                    Out-Result -Text "A ciklus újraindul $($Script:config.retrytime) másodperc múlva"
+                    Start-Wait -Seconds $Script:config.retrytime
+                }
+                else
+                {
+                    Out-Result -Text "A ciklus újraindul a munkaidő kezdetén"
+                    Start-Wait -Tomorrow 7 -SkipWeekend
+                }
                 Out-Result -Text "`nA folyamat folytatódik"
             }
         } while ($templist.Count -ne 0) # Ha a $templist tömbben nem marad elem, a ciklus befejezhető
 
         Out-Result -Text "A(z) $($Script:config.ounev) OU számítógépeinek helyének lekérdezése sikeresen befejeződött" -Tag "end"
-        Write-Host "A program egy billetnyű leütését követően visszatér a főmenübe."
-        Get-Valasztas
+        Show-Menu -BackOne -Exit
     }
     else
     {
         Out-Result -Text "Nem sikerült használható adatot szerezni a(z) $($Script:config.ounev) OU gépeiről! Folyamat vége!" -Level "err" -Tag "err"
-        Out-Result -Text "A főmenübe visszatéréshez üss le egy billentyűt!"
-        Get-Valasztas
+        Show-Menu -BackOne -Exit
     }
 }
 
@@ -3758,14 +3895,12 @@ function Get-IPrangeDevicesLocation
         $remote = [Remote]::New($ipcim[$i])
         if($remote.Elerheto())
         {
-            $keresesiparancs = [Parancs]::TraceRT($local, $remote)
+            $keresesiparancs = Format-TracertCommand -Local $local -Remote $remote
             if($keresesiparancs)
             {
-                $lekerdezes = [Lekerdezes]::New($keresesiparancs, $local, $remote)
-                if($lekerdezes.Siker())
+                $eszkoz.Lekerdez($keresesiparancs, $local, $remote)
+                if($eszkoz.Lekerdezes)
                 {
-                    $lekerdezes.ObjektumKitolto($eszkoz[$i])
-                    $eszkoz[$i].SetNev()
                     $csv.Sync($eszkoz[$i])
                     Write-Host "`rA(z) $($eszkoz[$i].IPaddress) eszköz megtalálva a(z) $($eszkoz[$i].SwitchNev) switch $($eszkoz[$i].Port) portján"
                     if ($sajateszkoz)
@@ -3837,9 +3972,8 @@ function Test-ADcomputersState
     else
     {
         Out-Result -Text "A(z) $($Script:config.ounev) OU gépeinek lekérdezése hibába ütközött!" -Level "err" -Tag "err"
-        Out-Result -Text "Egy billentyű leütésével visszatérhetsz a főmenübe"
     }
-    Get-Valasztas
+    Show-Menu -BackOne -Exit
 }
 
 ######### ELLENŐRIZVE, KÉSZ !!!!!!!!!!!!!!!!!!!!!!!!!
@@ -3887,8 +4021,8 @@ function Test-IPRangeState
         Out-Result -Text "$($eszkoz): Állapota: $($pingdev.Állapot)$($pingdev.Nevkiir())" -Tag "devstate" -Overwrite
         $pingdev.OutCSV($csv.kimenet) # Eredmény CSV fájlba írása
     }
-    Write-Host "A(z) $($eszkozok[0].ToString()) - $($eszkozok[-1].ToString()) IP tartomány lekérdezése befejeződött. Egy billentyű leütésével visszatérhetsz a főmenübe"
-    Get-Valasztas
+    Write-Host "A(z) $($eszkozok[0].ToString()) - $($eszkozok[-1].ToString()) IP tartomány lekérdezése befejeződött."
+    Show-Menu -BackOne -Exit
 }
 
 ######### ELLENŐRIZVE, KÉSZ !!!!!!!!!!!!!!!!!!!!!!!!!
@@ -3912,7 +4046,7 @@ function Get-UserCurrentComputer
     #
     ###############################################################
 
-    Show-Cimsor -Almenu "BEJELENTKEZÉSIHELY AZONOSÍTÓ"
+    Show-Cimsor -Almenu "Bejelentkezésihely azonosító"
 
     try # Kísérlet a fileszerver automatikus megállapítására
     {
@@ -3979,6 +4113,18 @@ function Get-UserCurrentComputer
     } while ($kilep)
 }
 
+###################################################################################################
+###                                    FŐMENÜ BEJEGYZÉSEK                                       ###
+###################################################################################################
+
+$MainMenu = New-Object System.Collections.ArrayList($null)
+[void]$MainMenu.Add([MenuElem]::New("Egy eszköz helyének megkeresése a hálózaton", $True, $False, ${function:Get-DeviceLocation}))
+[void]$MainMenu.Add([MenuElem]::New("Egy OU minden számítógépe helyének lekérdezése, és fájlba mentése", $True, $True, ${function:Get-ADcomputersLocation}))
+[void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány minden eszköze helyének lekérdezése, és fájlba mentése", $True, $True, ${function:Get-IPrangeDevicesLocation}))
+[void]$MainMenu.Add([MenuElem]::New("Egy OU gépeinek végigpingelése, és az eredmény fájlba mentése", $False, $True, ${function:Test-ADcomputersState}))
+[void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány végigpingelése, és az eredmény fájlba mentése", ${function:Test-IPRangeState}))
+[void]$MainMenu.Add([MenuElem]::New("Egy felhasználó jelenleg használt gépének neve", $True, $True, ${function:Get-UserCurrentComputer}))
+
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
 #-#-#                                   BELÉPÉSI PONT                                         #-#-#
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
@@ -3987,5 +4133,6 @@ Initialize-Basics -Admin
 
 for(;;)
 {
+    Show-Cimsor -Almenu "Főmenü"
     Show-Menu -Menu $MainMenu -Exit
 }
