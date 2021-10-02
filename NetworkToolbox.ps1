@@ -37,12 +37,11 @@ $ErrorActionPreference = "Stop"
 
 $Script:config = @{
     ### Alapbeállítások ###
-    runonce = $False
-    startazonnal = $True
     varakozasbevitelre = 5
     dbfile = "NetworkToolbox"
     debug = $False
     csvkonyvtar = ".\Logfiles"
+    csvin = ".\switchlist.csv"
 
     ### Logolás ###
     logging = $True
@@ -54,6 +53,7 @@ $Script:config = @{
     nevgyujtes = $True
     logonline = $True
     logoffline = $True
+    tftp = "tftpIP"
     switch = "switchip"
     fileserver = "fileszervernév"
     ounev = "alapértelmezett"
@@ -317,9 +317,9 @@ Class MenuElem
         $this.Call = $Call
     }
 
-    MenuElem($Call)
+    MenuElem($Nev)
     {
-        $this.Call = $Call
+        $this.Nev = $Nev
     }
 }
 
@@ -562,6 +562,8 @@ function Show-Menu
     # Bemenet:      -Menu:      A menüelemeket tartalmazó ArrayList, nem kötelező megadni
     #               -Exit:      Kapcsoló, amellyel megadhatjuk, hogy utolsó elemként bekerüljön-e a Kilépés menüpont
     #               -BackOne:   Kapcsoló, amellyel megadhtajuk, hogy utolsó (vagy -Exit esetén utolsó előtti) elemként bekerüljön-e a "Visszalépés az előző menübe" menüpont
+    #               -Options:   Kapcsoló, amellyel megadhatjuk, hogy jelenjen meg a beállítások menüpont
+    #               -JustShow:  Kapcsoló, amellyel megadhatjuk, hogy a függvény ne maga hívja meg a menü függvényeit
     #
     # Függőségek:   MenuElem osztály
     #               Get-Valasztas
@@ -571,7 +573,9 @@ function Show-Menu
     param(
         [Parameter(Mandatory=$false)]$Menu,
         [Switch]$Exit,
-        [Switch]$BackOne
+        [Switch]$BackOne,
+        [Switch]$Options,
+        [Switch]$JustShow
     )
 
     $valasztastomb = $null
@@ -617,6 +621,11 @@ function Show-Menu
         }
     }
 
+    if($Options)
+    {
+        Write-Host "(B) Beállítások"
+        $valasztastomb += "B"
+    }
     if($BackOne) # Ha szeretnénk, hogy legyen egy "Vissza" menüpont
     {
         Write-Host "(V) Visszalépés az előző menübe"
@@ -637,7 +646,15 @@ function Show-Menu
         {
             Exit
         }
+        elseif($JustShow)
+        {
+            Return $valaszt
+        }
         elseif ($valaszt -eq "V") { }
+        elseif ($valaszt -eq "B")
+        {
+            Update-Config    
+        }
         else
         {
             if($MenuToShow[$valaszt-1].Call)
@@ -1822,7 +1839,7 @@ Class Eszkoz
     }
 
 #### SWITCH LEKÉRDEZÉS METÓDUSOK ####
-    Lekerdez($keresesiparancs, $local, $remote)
+    Lekerdez($keresesiparancs, $local, $remote, $allapot)
     {
         $this.Local = $local
         $this.Remote = $remote
@@ -1848,7 +1865,7 @@ Class Eszkoz
         $waittimeorig = $script:config.waittime
         do
         {
-            Out-Result "A(z) $($this.IPaddress) IP című eszköz helyének lekérdezése folyamatban..." -Overwrite
+            Out-Result "$allapot A(z) $($this.IPaddress) IP című eszköz helyének lekérdezése folyamatban..." -Overwrite
             $result = [Telnet]::InvokeCommands($parancs)
             Show-Debug $result
             if(!$result)
@@ -1862,7 +1879,7 @@ Class Eszkoz
             }
             if ($result | Select-String -Pattern "trace aborted")
             {
-                Show-Debug "Az útvonal lekérése sikertelen nem próbálkozom újra"
+                Show-Debug "Az útvonal lekérése sikertelen, nem próbálkozom újra"
                 $failcount = $script:config.maxhiba
             }
             elseif (!$this.Lekerdezes -and $failcount -lt $script:config.maxhiba)
@@ -1870,9 +1887,11 @@ Class Eszkoz
                 Show-Debug "Az útvonal lekérése sikertelen, újrapróbálkozom hosszabb idővel, ami jelenleg: $($script:config.waittime) ezredmásodperc"
                 $failcount++
                 $visszamaradt = $script:config.maxhiba - $failcount
+                Write-Host "$allapot " -NoNewline
                 Out-Result -Text "A(z) $($this.IPaddress) eszköz helyének lekérdezése most nem járt sikerrel. Még $visszamaradt alkalommal újrapróbálkozom!" -Level "warn" -Tag "timeout"
                 if ($failcount -eq $script:config.maxhiba)
                 {
+                    Write-Host "$allapot " -NoNewline
                     Out-Result -Text "A(z) $($this.IPaddress) eszköz helyének lekérdezése a(z) $($script:config.switch) IP című switchről időtúllépés miatt nem sikerült" -Tag "timeout" -Level "err"
                     Show-Debug $this.result
                 }
@@ -1965,22 +1984,6 @@ Class Eszkoz
         {
             Add-Log -Text $result -Tag "err"
         }
-    }
-
-    Kiirat()
-    {
-        $consolout = $null
-        foreach ($sor in $this.sorok)
-        {
-            if ($sor | Select-String -pattern "=>")
-            {
-                $consolout += "$sor`n"
-            }
-        }
-        Show-Cimsor "ESZKÖZ FIZIKAI HELYÉNEK MEGKERESÉSE"
-        Write-Host "Az adatcsomagok útja erről az eszközről a(z) $($this.IPaddress) IP című eszközig:"
-        Write-Host $consolout
-        Write-Host "A keresett eszköz a(z) $($this.SwitchNev) $($this.SwitchIP) switch $($this.Port) portján található." -ForegroundColor Green
     }
 
     Log()
@@ -2087,30 +2090,6 @@ Class Local
         {
             Return $False
         }
-    }
-
-    Static [String]CreateTable()
-    {
-        $commandtext = "CREATE TABLE IF NOT EXISTS Local (
-                        Gepnev varchar(255),
-                        IPaddress varchar(255),
-                        MACaddress varchar(255),
-                        Mask varchar(255),
-                        SwitchNev varchar(255),
-                        SwitchIP varchar(255),
-                        Port varchar(255),
-                        Megbizhato int
-                        );"
-        return $commandtext
-    }
-
-    InsertIntoSQL()
-    {
-        $commandtext = "INSERT INTO Local (Gepnev, IPaddress, MACaddress, Mask, SwitchNev, SwitchIP, Port, Megbizhato) Values (@Gepnev, @IPaddress, @MACaddress, @Mask, @SwitchNev, @SwitchIP, @Port, @Megbizhato)"
-        $attribnames = @("@Gepnev", "@IPaddress", "@MACaddress", "@Mask", "@SwitchNev", "@SwitchIP", "@Port", "@Megbizhato")
-        $values = @($this.Gepnev, $this.IPaddress, $this.MACaddress, $this.Mask, $this.SwitchNev, $this.SwitchIP, $this.Port, $this.Megbizhato)
-
-        $script:sql.AddRow($commandtext, $attribnames, $values)
     }
 }
 
@@ -2252,26 +2231,6 @@ Class Remote
             return "Offline"
         }
     }
-
-    Static [String]CreateTable()
-    {
-        $commandtext = "CREATE TABLE IF NOT EXISTS Local (
-                        Eszkoznev varchar(255),
-                        IPaddress varchar(255),
-                        MACaddress varchar(255),
-                        Online int
-                        );"
-        return $commandtext
-    }
-
-    InsertIntoSQL()
-    {
-        $commandtext = "INSERT INTO Remote (Eszkoznev, IPaddress, MACaddress, Online) Values (@Eszkoznev, @IPaddress, @MACaddress, @Online)"
-        $attribnames = @("@Eszkoznev", "@IPaddress", "@MACaddress", "Online")
-        $values = @($this.Eszkoznev, $this.IPaddress, $this.MACaddress, $this.Online)
-
-        $script:sql.AddRow($commandtext, $attribnames, $values)
-    }
 }
 
 Class PingDevice
@@ -2372,7 +2331,27 @@ Class PingDevice
             $this | export-csv -encoding UTF8 -path $csvkimenet -NoTypeInformation -Append -Force -Delimiter ";"
         }
     }
+}
 
+Class SwitchDev
+{
+    $IPaddress
+    $Eszkoznev
+    $Online
+    $Kesz
+
+    SwitchDev()
+    {
+
+    }
+
+    SwitchDev($IPaddress, $Eszkoznev)
+    {
+        $this.IPaddress = $IPaddress
+        $this.Eszkoznev = $Eszkoznev
+        $this.Online = $true
+        $this.Kesz = $false
+    }
 }
 
 # Tiszta
@@ -2549,25 +2528,6 @@ Class MasVLAN
         $vlan = ($tracegep.IPAddress).Split(".")
         $this.subnet = "$($vlan[0]).$($vlan[1]).$($vlan[2])"
     }
-
-    Static [String]CreateTable()
-    {
-        $commandtext = "CREATE TABLE IF NOT EXISTS MasVLAN (
-                        subnet varchar(255),
-                        mask varchar(255),
-                        tracegep varchar(255)
-                        );"
-        return $commandtext
-    }
-
-    InsertIntoSQL()
-    {
-        $commandtext = "INSERT INTO MasVLAN (subnet, mask, tracegep) Values (@subnet, @mask, @tracegep)"
-        $attribnames = @("@subnet", "@mask", "@tracegep")
-        $values = @($this.subnet, $this.mask, $this.tracegep)
-
-        $script:sql.AddRow($commandtext, $attribnames, $values)
-    }
 }
 
 #####
@@ -2579,6 +2539,7 @@ Class Telnet
     Static $Felhasznalonev = $null
     Static $Jelszo = $null
     Static $nonroot
+
     Static Login()
     {
         if (![Telnet]::Felhasznalonev -or ![Telnet]::Jelszo)
@@ -2620,7 +2581,7 @@ Class Telnet
 
     Static SetSwitch()
     {
-        Show-Cimsor "SWITCH BEJELENTKEZÉS"
+        Show-Cimsor "Switch bejelentkezés"
         Write-Host "Az alapértelmezett switchet használod ($($script:config.switch)), vagy megadod kézzel a címet?`nAdd meg a switch IP címét, ha választani szeretnél, vagy üss Entert, ha az alapértelmezettet használnád!"
         do
         {
@@ -2630,9 +2591,8 @@ Class Telnet
             {
                 if (!(Test-Connection $valassz -Quiet -Count 1))
                 {
-                    $message = "A(z) $valassz IP címen nem található eszköz"
-                    Add-Log -Text $message -Tag "unreachable"
-                    Write-Host "$message, add meg újra a címet, vagy üss Entert az alapértelmezett switch használatához!" -ForegroundColor Red
+                    Out-Result -Text "A(z) $valassz IP címen nem található eszköz" -Tag "unreachable" -NoNewLine -Level "err"
+                    Out-Result -Text ", add meg újra a címet, vagy üss Entert az alapértelmezett switch használatához!" -Level "err"
                     $kilep = $false
                 }
                 if($kilep)
@@ -2643,6 +2603,11 @@ Class Telnet
         }while(!$kilep)
     }
 
+    Static SetSwitch($switchIP)
+    {
+        $Script:config.switch = $switchIP
+    }
+
     Static [bool]TestConnection()
     {
         $login = $false
@@ -2651,9 +2616,7 @@ Class Telnet
         $login = $logintest | Select-String -Pattern "#", ">"
         if (!$login -or !$logintest)
         {
-            $message = "A megadott felhasználónév: $([Telnet]::felhasznalonev), vagy a hozzá tartozó jelszó nem megfelelő, esetleg a(z) $($script:config.switch) címen nincs elérhető switch"
-            Add-Log -Text $message -Tag "conerr"
-            Write-Host "$message!" -ForegroundColor Red
+            Out-Result -Text "A megadott felhasználónév: $([Telnet]::felhasznalonev), vagy a hozzá tartozó jelszó nem megfelelő, esetleg a(z) $($script:config.switch) címen nincs elérhető switch" -Tag "conerr" -Level "err"
             $login = $false
         }
         else
@@ -2670,7 +2633,7 @@ Class Telnet
 
     Static [Object]InvokeCommands($parancsok)
     {
-        $socket = $false
+        $socket = $null
         $result = ""
         if([Telnet]::nonroot)
         {
@@ -2698,24 +2661,23 @@ Class Telnet
     
         if($socket)
         {
-            Show-Debug "Socket Stimt"
             $stream = $socket.GetStream()
             $writer = New-Object System.IO.StreamWriter($stream)
             $buffer = New-Object System.Byte[] 1024
             $encoding = New-Object System.Text.ASCIIEncoding
             foreach ($command in $commands)
             {
-                #Write-Host $command
                 $writer.WriteLine($command)
                 $writer.Flush()
-                Start-Sleep -Milliseconds $script:config.waittime
+                [Telnet]::Allapot()
                 $read = $Stream.read($buffer, 0, 1024)
                 $kiolvasottsor = ($encoding.GetString($buffer, 0, $read))
+                Show-Debug $kiolvasottsor
                 $result += $kiolvasottsor
             }
     
-            Start-Sleep -Milliseconds $script:config.waittime
-    <#
+    <#      Start-Sleep -Milliseconds $script:config.waittime
+    
             while($stream.DataAvailable)
             {
                 $read = $Stream.read($buffer, 0, 1024)
@@ -2727,8 +2689,20 @@ Class Telnet
         {
             $result = $false
         }
-    
         return $result
+    }
+
+    Allapot()
+    {
+        $szoveg = "Parancs switchen futtatása folyamatban"
+        $wait = $Script:config.waittime / 250
+        $pont = ""
+        for($i = 0; $i -lt $wait; $i++)
+        {
+            $pont += "."
+            Out-Result "$szoveg$pont" -Overwrite -NoNewLine
+            Start-Sleep -Milliseconds 250
+        }
     }
 }
 
@@ -2968,6 +2942,8 @@ function Import-SQLiteData
     #               használja az adatok frissen importálása helyett.
     #               Amennyiben a felhasználó az újraimportálás mellett dönt, úgy a függvény eldobja
     #               a jelenlegi adattáblát, amennyiben a meglévő adattáblát használná, elvégzi az SQL importálást.
+    #               A függvény használatának nagy előnye, hogy rugalmasan képes működni, függetlenül attól,
+    #               hogy az importálni kívánt adattáblában hány attribútum található.
     #                                           !!!! FIGYELEM !!!!
     #               A függvény NEM végez semmilyen összevetést a kimenetnek szánt objektum, és az adattáblából vett
     #               adatok között. Tehát ha a táblában van egy olyan oszlop, ami az objektum osztályában nincs,
@@ -2976,8 +2952,8 @@ function Import-SQLiteData
     #               A használt objektum osztályának rendelkeznie KELL paraméter nélküli konstruktorral!
     #
     # Bemenet:      -EgyediNev:     az ellenőrizendő adattábla neve, kötelező megadni
-    #               -ObjType:           a visszadott objektumok típusa, kötelező megadni
-    #               -Silent:            kapcsoló, használatával kikapcsolható a felhasználó megkérdezése az importról
+    #               -ObjType:       a visszadott objektumok típusa, kötelező megadni
+    #               -Silent:        kapcsoló, használatával kikapcsolható a felhasználó megkérdezése az importról
     #
     # Kimenet:      Objektumokat tartalmazó tömb, vagy Bool $False
     #
@@ -3071,6 +3047,101 @@ function Import-SQLiteData
     else
     {
         return ,$returnObjArr # A vessző NEM elírás, enélkül objektumot ad vissza a függvény, nem ArrayList-et
+    }
+}
+
+function Import-FromCSV
+{
+    ###############################################################
+    #
+    # Leírás:       Tömböt CSV fájlból importáló függvény. A bemenetként kapott CSV fájlból a bemenetként kapott
+    #               típusú objektumokat próbálja létrehozni.
+    #               A függvény használatának nagy előnye, hogy tökéletesen független a bemenetként használt
+    #               CSV-ben található oszlopok számától. Egyoszlopos CSV-kkel ugyanúgy működik,
+    #               mint tízoszloposokkal.
+    #                                           !!!! FIGYELEM !!!!
+    #               A függvény NEM végez semmilyen összevetést a kimenetnek szánt objektum, és a CSV fájlból vett
+    #               adatok között. Tehát ha a CSV fájlban van egy olyan oszlop, ami az objektum osztályában nincs,
+    #               a függvény egyszerűen létrehozza!
+    #                                           !!!! FIGYELEM 2 !!!!
+    #               A használt objektum osztályának rendelkeznie KELL paraméter nélküli konstruktorral!
+    #
+    # Bemenet:      -ObjType:       a visszadott objektumok típusa, kötelező megadni
+    #
+    # Kimenet:      Objektumokat tartalmazó tömb, vagy Bool $False
+    #
+    # Függőségek:   * Out-Result
+    #
+    ###############################################################
+
+    param([Parameter(mandatory=$True)]$ObjType)
+    
+    try
+    {
+        $csvdata = Import-Csv -Path $Script:config.csvin -Delimiter ";"
+    }
+    catch
+    {
+        $returnObjArr = $false
+        Out-Result -Text "A bemenetként megadott CSV fájl nem található" -Level "warn" -Tag "fileerr" -Overwrite
+    }
+
+    if($csvdata)
+    {
+        $returnObjArr = New-Object System.Collections.ArrayList($null)
+        ForEach($Row in $csvdata) # Lekérjük a sorokat a CSV fájlból
+        {
+            $toInvoke = "New-Object $ObjType" # Csúnya megoldás stringként megadni a típus nevét, de működik
+            try # Tekintve, hogy nincs típusellenőrzés, fel kell készülni, hogy nem létező típust kap bemenetként a függvény
+            {
+                $Record = Invoke-Expression $toInvoke # Az invoke parancs így a stringben kapott típusú objektumot hozza létre
+            }
+            catch
+            {
+                Out-Result "A megadott objektumtípus: [$ObjType] nem található a jelen környezetben, vagy nincs paraméter nélküli konstruktora!" -Level "err" -Tag "err"
+                $returnObjArr = $False
+                Break
+            }
+
+            ForEach($Col in $Row.PsObject.Properties) # Végigmegyünk az oszlopokon
+            {
+                # A CSV fájlból értelemszerűen csak string típusú objektumok érkeznek,
+                # így a $null, $true, és $false átalakításokat most kell elvégezni
+                $value = $Col.Value
+                if($value -eq "null" -or $value -eq "")
+                {
+                    $value = $null
+                }
+                elseif($value -eq "True")
+                {
+                    $value = $True
+                }
+                elseif($Row.$Col -eq "False")
+                {
+                    $value = $False
+                }
+
+                # A konverziók után az oszlop nevének megfelelő értéket hozzáadjuk
+                # az objektum azonos nevű attribútumához
+                # A -Force kapcsoló nélkül ütközést érzékelne, de ez nem okoz problémát
+                Add-Member -InputObject $Record -NotePropertyName $Col.Name -NotePropertyValue $value -Force
+            }
+            $returnObjArr.Add($Record) > $null # Az elkészült objektumot hozzáadjuk a visszaadott tömbhöz
+        }
+
+        if($returnObjArr.Count -eq 0)
+        {
+            $returnObjArr = $false
+            Out-Result -Text "A CSV fájl nem tartalmaz értelmezhető adatot" -Level "warn" -Tag "fileerr"
+        }
+    }
+    if(!$returnObjArr)
+    {
+        Return $returnObjArr
+    }
+    else
+    {
+        return ,$returnObjArr
     }
 }
 
@@ -3231,97 +3302,6 @@ function Set-Logname
     param([Parameter(Mandatory=$true)]$Filename)
 
     $Script:config.logfile = "$Filename.log"
-}
-
-###### OSZTÁLYBÓL KIVÉVE, ÚJRAÍRÁST IGÉNYEL!!!!!!!!!!!!
-function Update-Config
-{
-    $valasztas = $false
-    do
-    {
-        Show-Cimsor "BEÁLLÍTÁSOK"
-
-        $csvsavemode = 0
-        if ($this.logonline -and $this.logoffline)
-        {
-            $optlogonline = "Az Online és Offline gépek is mentésre kerülnek"
-            $csvsavemode = 1
-        }
-        elseif ($this.logonline -and !$this.logoffline)
-        {
-            $optlogonline = "Csak az Online gépek kerülnek mentésre"
-            $csvsavemode = 2
-        }
-        elseif (!$this.logonline -and $this.logoffline)
-        {
-            $optlogonline = "Csak az Offline gépek kerülnek mentésre"
-            $csvsavemode = 3
-        }
-        else
-        {
-            $optlogonline = "Az eredmények nem kerülnek mentésre"
-            $csvsavemode = 0
-        }
-
-        if ($this.method -eq 2)
-        {
-            $optmethod = "Sokkal lassabb, de valamivel megbízhatóbb"
-        }
-        else
-        {
-            $optmethod = "Gyors, de néha ad fals negatív eredményt"
-        }
-        Write-Host "(1) Logolás: " -NoNewline
-        Get-TrueFalse $this.log
-        Write-Host "(2) Időbélyegző a logokhoz: " -NoNewline
-        Get-TrueFalse $this.logtime
-        Write-Host "(3) Debug mód: " -NoNewline
-        Get-TrueFalse $this.debug
-        Write-Host "(4) Pingelés során az online eszközök nevének gyűjtése (bizonyos esetekben jelentősen lassíthatja a folyamatot): " -NoNewline
-        Get-TrueFalse $this.nevgyujtes
-        Write-Host "(5) A pingelési folyamat során készülő CSV fájlba: $optlogonline"
-        Write-Host "(6) A lekérdezés módja: $optmethod"
-        Write-Host "(7) Az eszközök kereséséhez használt switch IP címe: $($this.Switch)"
-        Write-Host "(8) Alapértelmezett várakozási idő két switch parancs között miliszekundumban: $($this.waittime)"
-        Write-Host "(9) Maximális újrapróbálkozások száma sikertelen eredmény esetén: $($this.maxhiba)"
-        Write-Host "(10) AD lekérdezés esetén ennyi napon belül belépett gépek használata: $($this.aktivnapok)"
-        Write-Host "(11) A logok mentésének jelenlegi fájlja: $($this.logfile)"
-        Write-Host "(K) Beállítások véglegesítése"
-        Write-Host "A beállítások megváltoztatásához használd a mellettük látható számbillentyűket!"
-        $valasztas = Get-Valasztas ("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "K")
-
-        switch ($valasztas)
-        {
-            1 { if ($this.log) { $this.log = $false} else { $this.log = $true} }
-            2 { if ($this.logtime) { $this.logtime = $false} else { $this.logtime = $true} }
-            3 { if ($this.debug) { $this.debug = $false} else { $this.debug = $true} }
-            4 { if ($this.nevgyujtes) { $this.nevgyujtes = $false} else { $this.nevgyujtes = $true} }
-            5 { if ($csvsavemode -lt 3) { $csvsavemode++ } else { $csvsavemode = 0 } }
-            6 { if ($this.method -eq 1) { $this.method = 2} else { $this.method = 1} }
-            7 { [Telnet]::SetSwitch() }
-            8 { try { [int32]$this.waittime = Read-Host -Prompt "Várakozási idő" } catch { Write-Host "HIBÁS ÉRTÉK" -ForegroundColor Red; Read-Host } }
-            9 { try { [int32]$this.maxhiba = Read-Host -Prompt "Megengedett hibaszám" } catch { Write-Host "HIBÁS ÉRTÉK" -ForegroundColor Red; Read-Host } }
-            10 { try { [int32]$this.aktivnapok = Read-Host -Prompt "Ennyi napon belül aktív gépek" } catch { Write-Host "HIBÁS ÉRTÉK" -ForegroundColor Red; Read-Host } }
-            11 { Write-Host "A program gyökérkönyvtárára a '.\' kezdéssel lehet hivatkozni."; $templog = Read-Host -Prompt "Log mentési hely"; if(!$templog) { Write-Host "HIBÁS ÉRTÉK" -ForegroundColor Red; Read-Host } else { $this.logfile = $templog } }
-            default {}
-        }
-
-        switch ($csvsavemode)
-        {
-            1 { $this.logonline = $true; $this.logoffline = $true }
-            2 { $this.logonline = $true; $this.logoffline = $false }
-            3 { $this.logonline = $false; $this.logoffline = $true }
-            0 { $this.logonline = $false; $this.logoffline = $false }
-        }
-    } while ($valasztas -ne "K")
-
-    Write-Host "Szeretnéd menteni a beállításokat, hogy legközelebb is ezeket használja a program?"
-    $valasztas = Get-Valasztas -YesNo
-
-    if($valasztas)
-    {
-        Write-Ini
-    }
 }
 
 # Tiszta
@@ -3628,14 +3608,12 @@ function Get-DeviceLocation
     # Függőségek:   * Show-Cimsor
     #               * Set-Logname
     #               * Get-Valasztas
+    #               * Format-TracertCommand
+    #               * Show-Menu
     #               * SQL osztály
     #               * Local osztály
     #               * Remote osztály
-    #               * Eszkoz osztály
     #               * Telnet osztály
-    #               * Lekerdezes osztály
-    #
-    # Megnézni:     [Eszkoz] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
     #
     ###############################################################
 
@@ -3658,10 +3636,21 @@ function Get-DeviceLocation
 
     [Telnet]::Login()
     $eszkoz = [Eszkoz]::New($remote.IPAddress)
-    $eszkoz.Lekerdez($keresesiparancs, $local, $remote)
+    $eszkoz.Lekerdez($keresesiparancs, $local, $remote, "(1/1)")
     if($eszkoz.Siker())
     {
-        $eszkoz.Kiirat()
+        $consolout = $null
+        foreach ($sor in $eszkoz.Sorok)
+        {
+            if ($sor | Select-String -pattern "=>")
+            {
+                $consolout += "$sor`n"
+            }
+        }
+        Show-Cimsor "Eszköz fizikai helyének megkeresése"
+        Write-Host "Az adatcsomagok útja erről az eszközről a(z) $($eszkoz.IPaddress) IP című eszközig:"
+        Write-Host $consolout
+        Write-Host "A keresett eszköz a(z) $($eszkoz.SwitchNev) $($eszkoz.SwitchIP) switch $($eszkoz.Port) portján található." -ForegroundColor Green
     }
     else
     {
@@ -3698,16 +3687,14 @@ function Get-ADcomputersLocation
     #               * Add-Log
     #               * Get-Valasztas
     #               * Start-Wait
+    #               * Format-TracertCommand
+    #               * Show-Menu
     #               * SQL osztály
     #               * CSV osztály
     #               * Local osztály
     #               * Remote osztály
     #               * Eszkoz osztály
-    #               * Parancs osztály
     #               * Telnet osztály
-    #               * Lekerdezes osztály
-    #
-    # Megnézni:     [Eszkoz] és [Lekérdezés] osztályok összevonása, Out-LocalToUse
     #
     ###############################################################
 
@@ -3767,7 +3754,8 @@ function Get-ADcomputersLocation
             foreach ($eszkoz in $ADgeplista)
             {
                 $aktualis++
-                Out-Result "($($aktualis)/$($osszdarab)) A(z) $($eszkoz.Eszkoznev) eszköz lekérdezése folyamatban." -NoNewLine
+                $allapot = "($($aktualis)/$($osszdarab))"
+                Out-Result "$allapot A(z) $($eszkoz.Eszkoznev) eszköz lekérdezése folyamatban." -NoNewLine
                 if (($eszkoz.Eszkoznev -eq $local.Gepnev) -and !$eszkoz.Finished) # Ellenőrizzük, hogy a listából vett gép nem-e ugyanaz, mint a sajátunk
                 {
                     Out-Result "A megkeresni kívánt gép ($($eszkoz.Eszkoznev)) megegyezik a jelenlegi eszközzel ($($local.Gepnev)). A keresés nem hajtható végre" -Level "warn" -Tag "devnamematch" -Overwrite
@@ -3792,7 +3780,7 @@ function Get-ADcomputersLocation
                         if($keresesiparancs) # Ha létre lehetett hozni parancsot, futtatjuk a lekérdezést
                         {
                             $eszkoz.SetTableName($Script:config.ounev) # Beállítjuk az [Eszkoz] objektumon, hogy melyik adattáblába próbálja beírni magát
-                            $eszkoz.Lekerdez($keresesiparancs, $localtouse, $remote)
+                            $eszkoz.Lekerdez($keresesiparancs, $localtouse, $remote, $allapot)
                             if($eszkoz.Lekerdezes) # Ha sikeres volt a lekérdezés
                             {
                                 Show-Debug "Lekérdezés sikeres"
@@ -3885,7 +3873,8 @@ function Get-IPrangeDevicesLocation
     {
         $sorszam = $i + 1
         $eszkoz.Add([Eszkoz]::New($ipcim[$i])) > $null
-        Write-Host "($sorszam/$ipdarab) A(z) $($eszkoz[$i].IPaddress) eszköz lekérdezése folyamatban." -NoNewline
+        $allapot = "($sorszam/$ipdarab)"
+        Write-Host "$allapot A(z) $($eszkoz[$i].IPaddress) eszköz lekérdezése folyamatban." -NoNewline
 
         if ($eszkoz[$i].IPaddress -eq $local.IPaddress)
         {
@@ -3898,7 +3887,7 @@ function Get-IPrangeDevicesLocation
             $keresesiparancs = Format-TracertCommand -Local $local -Remote $remote
             if($keresesiparancs)
             {
-                $eszkoz.Lekerdez($keresesiparancs, $local, $remote)
+                $eszkoz.Lekerdez($keresesiparancs, $local, $remote, $allapot)
                 if($eszkoz.Lekerdezes)
                 {
                     $csv.Sync($eszkoz[$i], "IPaddress")
@@ -3997,7 +3986,7 @@ function Test-IPRangeState
     #               * PingDevice osztály
     #               * Out-Result
     #               * Add-Log
-    #               * Get-Valasztas
+    #               * Show-Menu
     #
     ###############################################################
 
@@ -4113,6 +4102,225 @@ function Get-UserCurrentComputer
     } while ($kilep)
 }
 
+function Enter-SwitchBatchMode
+{
+    ###############################################################
+    #
+    # Leírás:       Switchek listáján csoportos műveleteket elvégző függvény.
+    #               
+    # Bemenet:      CSV fájl
+    #
+    # Kimenet:      A meghívott alfüggvénytől függ
+    #
+    # Függőségek:   * SwitchDev Osztály
+    #               * MenuElem Osztály
+    #               * Telnet osztály
+    #               * Show-Menu
+    #               * Out-Result
+    #               * Show-Cimsor
+    #               * Set-Logname
+    #
+    # Megjegyzés:   Megírás alatt, teszteletlen
+    #
+    ###############################################################
+
+    function Save-Configs
+    {
+        ###############################################################
+        #
+        # Leírás:       A switchek konfigurációjának mentését elvégző függvény. Ezt hívja meg a fő függvény,
+        #               hogy elvégezze a mentést
+        #               
+        # Bemenet:      A fő függvénnyel megegyező
+        #
+        # Kimenet:      A switchek konfigurációs fájljai a TFTP szerver mappájában
+        #
+        # Függőségek:   * A fő függvénnyel megegyező
+        #
+        ###############################################################
+
+        Out-Result -Text "A(z) $($Script:config.switch) konfigurációjának mentése folyamatban"
+        $copy = "copy run tftp://$($Script:config.tftp)/$($Script:config.switch)-$([Time]::FileDate()).conf"
+        [String[]]$mentes = @($copy, "", "") # Két Entert is a parancs végére kell másolni, hogy a mentési kérdést leokézzuk.
+        Show-Debug $mentes
+        #$result = [Telnet]::InvokeCommands($mentes)
+        Show-Debug $result
+    }
+
+    function Set-AutoBackup
+    {
+        ###############################################################
+        #
+        # Leírás:       A switcheken az automatikus mentést beállító függvény
+        #               
+        # Bemenet:      -AsCron:    Kapcsoló, ezt beállítva a mentés időzítése is megtörténik
+        #
+        # Kimenet:      Nincs
+        #
+        # Függőségek:   * A fő függvénnyel megegyező
+        #
+        ###############################################################
+
+        param([Switch]$AsCron)
+        Out-Result -Text "A(z) $($Script:config.switch) automatikus mentésének beállítása folyamatban"
+        $path = "path tftp://$($Script:config.tftp)/$($Script:config.switch)-`$t"
+        [String[]]$setupautosave = @("conf term", "archive", $path, "write-memory", "end", "write")
+        $result = [Telnet]::InvokeCommands($setupautosave)
+        Show-Debug $result
+        if($AsCron)
+        {
+            [String[]]$setupbackup = @("conf term", "kron policy-list Auto_Backup", "cli write memory", "exit", "kron occurrence Auto_Backup at 22:00 fri recurring", "end", "write")
+            $result = [Telnet]::InvokeCommands($setupbackup)
+            Show-Debug $result
+        }
+    }
+
+    function Get-VlanAssignment
+    {
+        ###############################################################
+        #
+        # Leírás:       A switcheken VLAN kiosztását táblázatba mentő függvény
+        #               
+        # Bemenet:      A fő függvénnyel megegyező
+        #
+        # Kimenet:      A VLAN kiosztás CSV fájlban
+        #
+        # Függőségek:   * A fő függvénnyel megegyező
+        #
+        ###############################################################
+
+        Out-Result -Text "A(z) $($Script:config.switch) VLAN kiosztásának mentésének folyamatban"
+        [String[]]$vlans = @("sh vlan")
+        $result = [Telnet]::InvokeCommands($vlans)
+        Show-Debug $result
+        # result feldolgozós rész, megírásra vár
+    }
+
+    do
+    {
+    ### Menü rész
+        Show-Cimsor "Parancsok csoportos futtatása switcheken"
+        Set-Logname -Filename "switchbatch"
+        $menuList = New-Object System.Collections.ArrayList($null)
+        [void]$menuList.Add([MenuElem]::New("Switchek konfigurációjának mentése"))
+        [void]$menuList.Add([MenuElem]::New("Switchek automatikus mentésének beállítása"))
+        [void]$menuList.Add([MenuElem]::New("Port VLAN kiosztás mentése"))
+        $valaszt = Show-Menu $menuList -Exit -BackOne -JustShow
+
+    ### Munka rész
+        $switchList = Import-FromCSV "SwitchDev"
+        #[Telnet]::Login()
+        foreach ($switch in $switchList)
+        {
+            Write-Host 
+            [Telnet]::SetSwitch($switch.IPaddress)
+            switch ($valaszt)
+            {
+                1 { Save-Configs }
+                2 { Set-AutoBackup }
+                3 { Get-VlanAssignment }
+                "V" { Break }
+                Default { Out-Result -Text "Rossz függvény lett meghívva!" -Level "err" }
+            }
+        }
+    } while ($valaszt -ne "V")
+}
+
+######### ELLENŐRIZVE, KÉSZ !!!!!!!!!!!!!!!!!!!!!!!!!
+function Update-Config
+{
+    ###############################################################
+    #
+    # Leírás:       A program beállításait futásidőben megváltoztató függvény.
+    #
+    # Bemenet:      Nincs
+    #
+    # Kimenet:      Nincs
+    #
+    # Függőségek:   * Show-Cimsor
+    #               * Get-Valasztas
+    #               * Get-TrueFalse (integrálva a függvénybe, mert máshol úgysem fog kelleni)
+    #
+    ###############################################################
+
+    function Get-TrueFalse
+    {
+        param($ertek)
+        if ($ertek) { Write-Host "Bekapcsolva" -ForegroundColor Green }
+        else { Write-Host "Kikapcsolva" -ForegroundColor Red }
+    }
+    
+    $valasztas = $false
+    do
+    {
+        Show-Cimsor "Beállítások"
+        Write-Host "`r(Az itt megadott beállítások csak a jelen futásra vonatkoznak, mentésre nem kerülnek)`n"
+
+        $csvsavemode = 0
+        $optlogonline = "Az eredmények nem kerülnek mentésre"
+        if ($Script:config.logonline -and $Script:config.logoffline)
+        {
+            $optlogonline = "Az Online és Offline gépek is mentésre kerülnek"
+            $csvsavemode = 1
+        }
+        elseif ($Script:config.logonline -and !$Script:config.logoffline)
+        {
+            $optlogonline = "Csak az Online gépek kerülnek mentésre"
+            $csvsavemode = 2
+        }
+        elseif (!$Script:config.logonline -and $Script:config.logoffline)
+        {
+            $optlogonline = "Csak az Offline gépek kerülnek mentésre"
+            $csvsavemode = 3
+        }
+
+        if ($Script:config.method -eq 2)
+        {
+            $optmethod = "Sokkal lassabb, de valamivel megbízhatóbb"
+        }
+        else
+        {
+            $optmethod = "Gyors, de néha ad fals negatív eredményt"
+        }
+        Write-Host "(1) Logolás: " -NoNewline
+        Get-TrueFalse $Script:config.log
+        Write-Host "(2) Debug mód: " -NoNewline
+        Get-TrueFalse $Script:config.debug
+        Write-Host "(3) Pingelés során az online eszközök nevének gyűjtése (jelentősen lassíthatja a folyamatot): " -NoNewline
+        Get-TrueFalse $Script:config.nevgyujtes
+        Write-Host "(4) A pingelési folyamat során készülő CSV fájlba: $optlogonline"
+        Write-Host "(5) A lekérdezés módja: $optmethod"
+        Write-Host "(6) Az eszközök kereséséhez használt switch IP címe: $($Script:config.Switch)"
+        Write-Host "(7) Alapértelmezett várakozási idő két switch parancs között miliszekundumban: $($Script:config.waittime)"
+        Write-Host "(8) Maximális újrapróbálkozások száma sikertelen eredmény esetén: $($Script:config.maxhiba)"
+        Write-Host "(9) AD lekérdezés esetén ennyi napon belül belépett gépek használata: $($Script:config.aktivnapok)"
+        Write-Host "(K) Beállítások véglegesítése"
+        Write-Host "A beállítások megváltoztatásához használd a mellettük látható számbillentyűket!"
+        $valasztas = Get-Valasztas @("1", "2", "3", "4", "5", "6", "7", "8", "9", "K")
+
+        switch ($valasztas)
+        {
+            1 { if ($Script:config.log) { $Script:config.log = $false} else { $Script:config.log = $true} }
+            2 { if ($Script:config.debug) { $Script:config.debug = $false} else { $Script:config.debug = $true} }
+            3 { if ($Script:config.nevgyujtes) { $Script:config.nevgyujtes = $false} else { $Script:config.nevgyujtes = $true} }
+            4 { if ($csvsavemode -lt 3) { $csvsavemode++ } else { $csvsavemode = 0 } }
+            5 { if ($Script:config.method -eq 1) { $Script:config.method = 2} else { $Script:config.method = 1} }
+            6 { [Telnet]::SetSwitch() }
+            7 { try { [int32]$Script:config.waittime = Read-Host -Prompt "Várakozási idő" } catch { Write-Host "HIBÁS ÉRTÉK" -ForegroundColor Red; Read-Host } }
+            8 { try { [int32]$Script:config.maxhiba = Read-Host -Prompt "Megengedett hibaszám" } catch { Write-Host "HIBÁS ÉRTÉK" -ForegroundColor Red; Read-Host } }
+            9 { try { [int32]$Script:config.aktivnapok = Read-Host -Prompt "Ennyi napon belül aktív gépek" } catch { Write-Host "HIBÁS ÉRTÉK" -ForegroundColor Red; Read-Host } }
+        }
+
+        switch ($csvsavemode)
+        {
+            1 { $Script:config.logonline = $true; $Script:config.logoffline = $true }
+            2 { $Script:config.logonline = $true; $Script:config.logoffline = $false }
+            3 { $Script:config.logonline = $false; $Script:config.logoffline = $true }
+            0 { $Script:config.logonline = $false; $Script:config.logoffline = $false }
+        }
+    } while ($valasztas -ne "K")
+}
+
 ###################################################################################################
 ###                                    FŐMENÜ BEJEGYZÉSEK                                       ###
 ###################################################################################################
@@ -4123,6 +4331,7 @@ $MainMenu = New-Object System.Collections.ArrayList($null)
 [void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány minden eszköze helyének lekérdezése, és fájlba mentése", $True, $True, ${function:Get-IPrangeDevicesLocation}))
 [void]$MainMenu.Add([MenuElem]::New("Egy OU gépeinek végigpingelése, és az eredmény fájlba mentése", $False, $True, ${function:Test-ADcomputersState}))
 [void]$MainMenu.Add([MenuElem]::New("Egy IP cím tartomány végigpingelése, és az eredmény fájlba mentése", ${function:Test-IPRangeState}))
+[void]$MainMenu.Add([MenuElem]::New("Parancsok csoportos futtatása switcheken", ${function:Enter-SwitchBatchMode}))
 [void]$MainMenu.Add([MenuElem]::New("Egy felhasználó jelenleg használt gépének neve", $True, $True, ${function:Get-UserCurrentComputer}))
 
 #-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#-#
@@ -4134,5 +4343,5 @@ Initialize-Basics -Admin
 for(;;)
 {
     Show-Cimsor -Almenu "Főmenü"
-    Show-Menu -Menu $MainMenu -Exit
+    Show-Menu -Menu $MainMenu -Exit -Options
 }
